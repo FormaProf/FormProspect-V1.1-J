@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "mandatory_wording": "Comme Form@Prof est un organisme de formation certifié Qualiopi, la formation peut, selon la situation de l'entreprise, l'éligibilité du bénéficiaire, les critères du financeur et son accord préalable, faire l'objet d'une prise en charge totale ou partielle.",
+  "forbidden_wording": [
+    "Votre formation sera forcément prise en charge.",
+    "La formation est gratuite.",
+    "Nous garantissons le remboursement."
+  ],
+  "possible_funders": [
+    {
+      "name": "FAFCEA",
+      "audience": "Chefs d'entreprise artisanale et conjoints collaborateurs selon les règles applicables",
+      "warning": "Toujours vérifier l'éligibilité, les plafonds, les délais et obtenir l'accord du financeur."
+    },
+    {
+      "name": "OPCO",
+      "audience": "Entreprises employant des salariés, selon leur branche et les règles de leur OPCO",
+      "warning": "La prise en charge dépend du dossier, du budget disponible et de l'accord de l'OPCO."
+    },
+    {
+      "name": "AGEFICE",
+      "audience": "Certains dirigeants non salariés du commerce, de l'industrie et des services",
+      "warning": "Vérifier l'attestation de contribution et les critères en vigueur."
+    }
+  ],
+  "sales_rule": "Présenter le financement comme une possibilité à étudier, jamais comme une certitude."
+}

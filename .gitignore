@@ -1,0 +1,51 @@
+# Secrets et configuration
+.env
+.env.*
+config/secrets.*
+*.pem
+*.key
+
+# Bases contenant de vraies données
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Fichiers temporaires
+logs/
+*.log
+.pytest_cache/
+
+# Compilations
+build/
+dist/
+*.exe
+
+# Build
+build/
+dist/
+release/
+release_staging/
+
+# Playwright
+playwright/
+**/playwright/
+**/_internal/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Executables
+*.exe
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3

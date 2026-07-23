@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "offers": [
+    {
+      "id": "pilotage_btp",
+      "name": "Formation au pilotage d'activité BTP et création d'un outil sur mesure",
+      "target": [
+        "Dirigeants du BTP",
+        "Artisans",
+        "TPE et PME"
+      ],
+      "format": [
+        "Présentiel",
+        "Distanciel"
+      ],
+      "duration_reference": "14 heures, adaptable selon le besoin",
+      "objectives": [
+        "Structurer le suivi de l'activité",
+        "Centraliser les informations utiles",
+        "Suivre les devis, chantiers, règlements et relances",
+        "Améliorer la visibilité sur le chiffre d'affaires, les marges et la rentabilité",
+        "Réduire les doubles saisies et les tâches administratives"
+      ],
+      "deliverables": [
+        "Analyse des besoins",
+        "Formation pratique",
+        "Outil de pilotage personnalisé sur Excel ou Google Sheets selon le projet",
+        "Support de prise en main",
+        "Accompagnement qualité pendant douze mois"
+      ],
+      "call_to_action": "Proposer un rendez-vous de découverte de vingt minutes."
+    },
+    {
+      "id": "excel",
+      "name": "Formation Excel",
+      "levels": [
+        "Débutant",
+        "Intermédiaire",
+        "Expert"
+      ],
+      "objectives": [
+        "Gagner en autonomie",
+        "Automatiser les tâches répétitives",
+        "Créer des tableaux de suivi fiables"
+      ],
+      "certification_possible": "TOSA selon l'offre retenue"
+    },
+    {
+      "id": "cybersecurite",
+      "name": "Formation Cybersécurité",
+      "objectives": [
+        "Réduire les risques humains",
+        "Adopter les bonnes pratiques",
+        "Sécuriser les usages quotidiens"
+      ]
+    }
+  ]
+}

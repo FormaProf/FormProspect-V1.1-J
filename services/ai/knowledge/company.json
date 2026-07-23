@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "brand": "Form@Prof – Up Your Skills",
+  "legal_entity": "NM FORMATION",
+  "positioning": "Organisme de formation spécialisé dans l'accompagnement opérationnel des entreprises, notamment du BTP.",
+  "certifications": [
+    {
+      "name": "Qualiopi",
+      "scope": "Actions de formation",
+      "commercial_wording": "Form@Prof est un organisme de formation certifié Qualiopi."
+    }
+  ],
+  "method": [
+    "Audit et analyse du fonctionnement actuel",
+    "Formation pratique adaptée à l'entreprise",
+    "Co-construction d'un outil de pilotage sur mesure",
+    "Tests, ajustements et prise en main",
+    "Accompagnement qualité pendant douze mois"
+  ],
+  "promise": "Former les équipes et créer avec elles un outil réellement adapté à leur fonctionnement, afin de gagner du temps et de mieux piloter l'activité.",
+  "tone": [
+    "professionnel",
+    "concret",
+    "rassurant",
+    "sans promesse excessive"
+  ]
+}
