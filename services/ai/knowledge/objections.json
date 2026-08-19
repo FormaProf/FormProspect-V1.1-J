@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "objections": [
+    {
+      "id": "already_excel",
+      "prospect_says": "J'utilise déjà Excel.",
+      "response": "C'est justement notre spécialité. Nous ne vous demandons pas d'abandonner vos habitudes : nous analysons votre fonctionnement, nous vous formons et nous construisons avec vous un outil Excel ou Google Sheets réellement adapté à votre entreprise.",
+      "follow_up_question": "Qu'est-ce qui vous fait perdre le plus de temps dans votre fichier actuel ?"
+    },
+    {
+      "id": "already_erp",
+      "prospect_says": "J'ai déjà un ERP ou un logiciel métier.",
+      "response": "L'objectif n'est pas forcément de remplacer votre logiciel. Nous identifions ce qu'il couvre déjà et nous créons uniquement le complément utile pour centraliser les informations ou obtenir les indicateurs qui vous manquent.",
+      "follow_up_question": "Quelles informations avez-vous encore du mal à obtenir rapidement aujourd'hui ?"
+    },
+    {
+      "id": "no_time",
+      "prospect_says": "Je n'ai pas le temps.",
+      "response": "Je comprends. L'objectif de l'accompagnement est précisément de vous faire gagner du temps ensuite, en réduisant les doubles saisies et en rendant les informations plus simples à retrouver.",
+      "follow_up_question": "Quelle tâche administrative vous prend actuellement le plus de temps chaque semaine ?"
+    },
+    {
+      "id": "too_expensive",
+      "prospect_says": "Cela va coûter trop cher.",
+      "response": "Avant de parler de coût, nous vérifions surtout que l'accompagnement répond à un besoin réel. Comme il s'agit d'une formation portée par un organisme certifié Qualiopi, une prise en charge peut aussi être étudiée selon votre situation et l'accord du financeur.",
+      "follow_up_question": "Quel serait pour vous le gain le plus important : du temps, une meilleure visibilité ou une réduction des erreurs ?"
+    },
+    {
+      "id": "no_need",
+      "prospect_says": "Je n'en ai pas besoin.",
+      "response": "Je comprends. Mon objectif n'est pas de vous convaincre à tout prix, mais simplement de vérifier votre organisation actuelle.",
+      "follow_up_question": "Comment suivez-vous aujourd'hui vos devis, vos chantiers, vos règlements et votre rentabilité ?"
+    },
+    {
+      "id": "send_email",
+      "prospect_says": "Envoyez-moi un mail.",
+      "response": "Avec plaisir. Pour que le message soit réellement pertinent, puis-je vous poser deux questions rapides sur votre organisation actuelle ?",
+      "follow_up_question": "Utilisez-vous principalement Excel, un logiciel métier ou plusieurs outils en parallèle ?"
+    }
+  ]
+}

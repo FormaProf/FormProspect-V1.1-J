@@ -1,0 +1,3 @@
+Première version avec système de mise à jour automatique
+Vérification sécurisée SHA-256 avant installation
+Améliorations de l'interface Form@Prospect

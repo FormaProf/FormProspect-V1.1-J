@@ -1,0 +1,27 @@
+DESKTOP 11.16 — STATISTIQUES ADMINISTRATEUR
+
+Dashboard global réservé à l'administrateur.
+
+KPI :
+- CA signé
+- nombre de ventes
+- montant encaissé
+- commissions générées
+- commissions versées
+- panier moyen
+- prospects attribués
+- clients
+- RDV obtenus
+- taux prospect -> client
+- taux client -> vente
+
+Pilotage :
+- Top 3 commerciaux visuel
+- tableau détaillé par commercial
+- top formations vendues
+- CA et encaissé par formation
+- évolution mensuelle du CA
+- tableau mensuel ventes / CA / encaissé / commissions
+- filtre par année
+
+Le module s'appuie sur l'API Cloud /admin-statistics du lot Cloud 10.10.

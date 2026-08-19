@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "notice": "Les cas ci-dessous sont des modèles commerciaux à personnaliser uniquement avec des informations réelles et vérifiables. Ils ne doivent pas être présentés comme des clients existants.",
+  "cases": [
+    {
+      "id": "template_btp_multi_files",
+      "status": "MODELE_A_PERSONNALISER",
+      "sector": "BTP",
+      "initial_problem": "Informations réparties dans plusieurs fichiers, doubles saisies et manque de visibilité sur les chantiers.",
+      "solution": "Formation des utilisateurs et co-création d'un tableau de pilotage centralisé.",
+      "possible_results_to_measure": [
+        "Temps administratif économisé",
+        "Délai de production des indicateurs",
+        "Taux de devis relancés",
+        "Visibilité sur les règlements",
+        "Suivi de la rentabilité par chantier"
+      ]
+    },
+    {
+      "id": "template_existing_erp",
+      "status": "MODELE_A_PERSONNALISER",
+      "sector": "Entreprise équipée d'un ERP",
+      "initial_problem": "Le logiciel métier couvre l'opérationnel mais certains indicateurs de direction restent difficiles à obtenir.",
+      "solution": "Création d'un outil complémentaire alimenté par des exports et formation à son utilisation.",
+      "possible_results_to_measure": [
+        "Réduction des manipulations manuelles",
+        "Centralisation des indicateurs",
+        "Temps de préparation des réunions de pilotage"
+      ]
+    }
+  ]
+}

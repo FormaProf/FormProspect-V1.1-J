@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "scripts": [
+    {
+      "id": "cold_call_btp",
+      "name": "Appel de prospection BTP",
+      "objective": "Obtenir un rendez-vous de découverte de vingt minutes.",
+      "sections": [
+        {
+          "title": "Accroche",
+          "content": "Bonjour Monsieur/Madame, je suis [Prénom] de Form@Prof – Up Your Skills. Nous accompagnons les entreprises du BTP dans l'organisation et le pilotage de leur activité."
+        },
+        {
+          "title": "Ouverture",
+          "content": "Beaucoup de dirigeants utilisent plusieurs fichiers ou un logiciel métier qui ne couvre pas tout. Comment pilotez-vous aujourd'hui vos devis, vos chantiers, vos règlements et votre rentabilité ?"
+        },
+        {
+          "title": "Proposition de valeur",
+          "content": "Nous commençons par une formation pratique adaptée à votre entreprise. Pendant cette formation, nous analysons vos besoins et nous construisons avec vous un outil de pilotage sur mesure."
+        },
+        {
+          "title": "Différenciation",
+          "content": "Nous ne nous arrêtons pas à la livraison de l'outil : un accompagnement qualité est prévu pendant douze mois pour vérifier qu'il reste adapté et fonctionne correctement."
+        },
+        {
+          "title": "Financement",
+          "content": "La formation peut, selon votre situation et l'accord du financeur, faire l'objet d'une prise en charge totale ou partielle."
+        },
+        {
+          "title": "Conclusion",
+          "content": "Je vous propose un échange d'une vingtaine de minutes afin de comprendre votre fonctionnement et de vérifier si cet accompagnement peut vous apporter un gain concret. Quel créneau vous conviendrait ?"
+        }
+      ]
+    }
+  ],
+  "qualification_questions": [
+    "Comment pilotez-vous aujourd'hui votre activité ?",
+    "Utilisez-vous Excel, Google Sheets, un ERP ou plusieurs outils ?",
+    "Comment suivez-vous la rentabilité de chaque chantier ?",
+    "Comment suivez-vous les devis en attente et les règlements ?",
+    "Quelles tâches administratives vous prennent le plus de temps ?",
+    "Combien de personnes utilisent ou alimentent vos outils de suivi ?",
+    "Quelles informations aimeriez-vous obtenir en quelques secondes ?"
+  ]
+}

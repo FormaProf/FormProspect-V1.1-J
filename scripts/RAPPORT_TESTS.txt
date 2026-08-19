@@ -1,0 +1,12 @@
+Compilation Python des 2 fichiers : OK
+Annuaire formateurs chargé : OK
+Sélection formateur sécurisée : OK
+Planning formateur : OK
+Financeur liste : OK
+Calcul jours ouvrés : OK
+Validation durée horaires : OK
+Fin automatique : OK
+Dossier complet 11.17 conservé : OK
+Test horaire 9h-12h / 13h-15h = 5 h/jour : OK
+Test 15 h / 5 h = 3 jours : OK
+Test visuel + appel réel API Cloud à effectuer sous Windows.

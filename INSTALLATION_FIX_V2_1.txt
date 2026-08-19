@@ -1,0 +1,13 @@
+FORM@PROSPECT - FIX ENRICHISSEMENT V2.1
+
+1. Fermer Form@Prospect.
+2. Sauvegarder le fichier actuel :
+   Form@Prospect\workers\enrichment_worker.py
+3. Copier le dossier Form@Prospect contenu dans ce ZIP dans :
+   C:\Users\Nacim\Desktop\MAJ Form@Prospect\FormProspect_V1.1-D_TEST\
+4. Accepter le remplacement.
+5. Relancer Form@Prospect depuis VS Code.
+6. Cliquer d'abord sur "Tester sur 20 prospects".
+
+Ce correctif ne touche PAS aux données prospects.
+Il isole Playwright Sync dans un thread Python natif sans boucle asyncio.

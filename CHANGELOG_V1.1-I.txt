@@ -1,0 +1,15 @@
+V1.1-I — Correctif tests SQLite Windows
+
+Fichiers modifiés :
+- tests/test_client_onboarding.py
+- tests/test_commissions.py
+- tests/test_document_generator.py
+- tests/test_training_catalog_rc202a.py
+- tests/test_training_cases_rc210.py
+- tests/test_training_cases_rc212.py
+
+Modification : remplacement des context managers sqlite3.connect(...) par
+core.sqlite_utils.connect_database(...), afin de fermer immédiatement les
+handles SQLite sous Windows.
+
+Tests desktop : 35 réussis, 0 échec dans l'environnement de validation.

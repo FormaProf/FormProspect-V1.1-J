@@ -1,0 +1,62 @@
+# ============================================================
+# Form@Prospect Desktop - fichiers √† ne jamais versionner
+# ============================================================
+
+# Secrets et configuration locale
+.env
+.env.*
+!.env.example
+config/secrets.*
+*.pem
+*.key
+
+# Bases de donn√©es locales / donn√©es r√©elles
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Caches et tests
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs et fichiers temporaires
+logs/
+*.log
+*.tmp
+*.bak
+
+# Compilations / ex√©cutables
+build/
+dist/
+*.exe
+
+# Releases g√©n√©r√©es
+/release/
+/release_publish/
+/release_staging/
+
+# Sauvegardes de mises √† jour
+/backups_update/
+
+# Documents g√©n√©r√©s depuis l'application
+/CONV-*.docx
+
+# Fichiers syst√®me / IDE
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+# Ancien dÈpÙt Git sauvegardÈ
+.git_ancien_incomplet/
+
+# Backend Cloud versionnÈ dans son dÈpÙt sÈparÈ
+/backend/

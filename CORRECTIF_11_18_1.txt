@@ -1,0 +1,17 @@
+FORM@PROSPECT DESKTOP 11.18.1
+
+Correction du parseur d'horaires.
+
+Le lot 11.18 cherchait par erreur le texte littéral \d au lieu des chiffres.
+Conséquence : 9h00–12h00 / 13h00–17h00 était considéré comme invalide et
+la date de fin ne pouvait pas être recalculée.
+
+Tests :
+- 9h00–12h00 / 13h00–17h00 = 7 h/jour : OK
+- 9h00–12h00 / 13h00–15h00 = 5 h/jour : OK
+- 09:00–12:00 / 13:00–15:00 = 5 h/jour : OK
+
+Exemple de la capture :
+Formation 14 h + 7 h/jour + début 19/08/2026
+=> 2 jours ouvrés
+=> fin automatique 20/08/2026.

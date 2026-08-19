@@ -1,0 +1,27 @@
+FORM@PROSPECT - FIX ENRICHISSEMENT V2.2 PLAYWRIGHT ASYNC
+
+Ce lot remplace uniquement la couche navigateur/enrichissement :
+- modules/browser_manager.py
+- modules/google_maps.py
+- modules/pages_jaunes.py
+- services/enrichment_service.py
+
+Installation :
+1. Fermer Form@Prospect.
+2. Faire une copie de sauvegarde du dossier actuel Form@Prospect.
+3. Décompresser ce ZIP.
+4. Copier le dossier Form@Prospect obtenu dans :
+   C:\Users\Nacim\Desktop\MAJ Form@Prospect\FormProspect_V1.1-D_TEST\
+5. Accepter la fusion/remplacement.
+6. Relancer Form@Prospect depuis VS Code.
+7. Cliquer d'abord sur "Tester sur 20 prospects".
+
+IMPORTANT :
+- Ne nettoyez pas les anciennes données avant validation du V2.2.
+- Le traitement reste séquentiel.
+- Google Maps est essayé d'abord.
+- PagesJaunes sert de fallback/complément.
+- Les résultats sont toujours soumis au score anti-faux-positifs.
+- Les 06/07 sont affichés en premier mais les fixes fiables sont conservés.
+
+Le worker V2.1 peut rester en place : il est compatible avec ce V2.2.

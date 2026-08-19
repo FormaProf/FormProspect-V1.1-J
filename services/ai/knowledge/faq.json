@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "items": [
+    {
+      "question": "L'outil est-il standard ?",
+      "answer": "Non. Il est conçu à partir de l'analyse des besoins et du fonctionnement réel de l'entreprise."
+    },
+    {
+      "question": "Faut-il abandonner notre logiciel actuel ?",
+      "answer": "Pas nécessairement. L'outil peut compléter un ERP ou un logiciel métier existant."
+    },
+    {
+      "question": "Sur quelle technologie l'outil est-il créé ?",
+      "answer": "Selon le besoin et le projet, il peut être conçu sur Excel ou Google Sheets."
+    },
+    {
+      "question": "La formation est-elle prise en charge ?",
+      "answer": "Une prise en charge totale ou partielle peut être étudiée selon la situation, l'éligibilité, les critères et l'accord préalable du financeur."
+    },
+    {
+      "question": "Que se passe-t-il après la formation ?",
+      "answer": "Form@Prof assure un accompagnement qualité pendant douze mois afin de vérifier que l'outil répond toujours au besoin et fonctionne correctement."
+    },
+    {
+      "question": "Combien de temps dure le rendez-vous de découverte ?",
+      "answer": "Environ vingt minutes, afin de comprendre l'organisation actuelle et les besoins prioritaires."
+    }
+  ]
+}

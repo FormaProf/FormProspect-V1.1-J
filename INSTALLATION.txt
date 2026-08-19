@@ -1,0 +1,13 @@
+CORRECTIF DESKTOP 11.4 — DEVIS & FACTURES CLOUD
+
+1. Fermez complètement Form@Prospect.
+2. Décompressez le contenu de l'archive dans :
+
+C:\Users\Nacim\Desktop\MAJ Form@Prospect\FormProspect_V1.1-D_TEST
+
+3. Acceptez le remplacement des fichiers.
+4. Relancez Form@Prospect.
+
+L'archive contient déjà le dossier Form@Prospect.
+
+Aucun git push et aucun déploiement Render ne sont nécessaires.

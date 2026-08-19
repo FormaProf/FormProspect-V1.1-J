@@ -1,0 +1,10 @@
+PySide6
+pandas
+openpyxl
+selenium
+webdriver-manager
+beautifulsoup4
+lxml
+requests
+keyring>=25,<26
+python-docx
