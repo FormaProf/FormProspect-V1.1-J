@@ -294,6 +294,7 @@ class NewSaleDialog(QDialog):
         footer_layout.addWidget(self.save_button)
         root.addWidget(footer)
 
+        self.prospect_combo.currentIndexChanged.connect(self._update_preview)
         self.training_combo.currentIndexChanged.connect(self._update_preview)
         self._load_data()
 
@@ -502,18 +503,42 @@ class NewSaleDialog(QDialog):
             self._update_preview()
 
     def _update_preview(self) -> None:
+        prospect = self.prospect_combo.currentData()
         training = self.training_combo.currentData()
-        if not isinstance(training, dict):
-            self.preview.setText("Aucune formation disponible")
+
+        if not isinstance(prospect, dict) or not isinstance(training, dict):
+            self.preview.setText("Sélectionnez un client et une formation.")
+            self.save_button.setEnabled(False)
             return
 
-        price_cents = int(training.get("price_cents") or 0)
+        prospect_id = str(prospect.get("id") or "").strip()
+        training_id = str(training.get("id") or "").strip()
+        if not prospect_id or not training_id:
+            self.preview.setText("Données de vente incomplètes.")
+            self.save_button.setEnabled(False)
+            return
+
+        self.preview.setText("Calcul de la commission Cloud…")
+        self.save_button.setEnabled(False)
+
         try:
-            rate = float(training.get("commission_rate") or 0)
+            result = self.api.preview_cloud_sale_commission(
+                {
+                    "prospect_id": prospect_id,
+                    "training_id": training_id,
+                }
+            )
+        except CloudAPIError as exc:
+            self.preview.setText(f"Aperçu indisponible : {exc}")
+            self.save_button.setEnabled(False)
+            return
+
+        price_cents = int(result.get("price_cents") or 0)
+        try:
+            rate = float(result.get("commission_rate") or 0)
         except (TypeError, ValueError):
             rate = 0.0
-
-        commission_cents = round(price_cents * rate / 100.0)
+        commission_cents = int(result.get("commission_cents") or 0)
 
         if rate <= 0:
             self.preview.setText(
@@ -523,12 +548,31 @@ class NewSaleDialog(QDialog):
             self.save_button.setEnabled(False)
             return
 
+        beneficiary_type = str(
+            result.get("commission_beneficiary_type") or "commercial"
+        )
+        beneficiary_name = str(
+            result.get("commission_beneficiary_name") or ""
+        ).strip()
+
+        if beneficiary_type == "commercial_partner":
+            commission_label = "Commission partenaire"
+            beneficiary_suffix = (
+                f"   •   Bénéficiaire : {beneficiary_name}"
+                if beneficiary_name
+                else ""
+            )
+        else:
+            commission_label = "Commission"
+            beneficiary_suffix = ""
+
         self.preview.setText(
             f"Prix signé : {self._format_euro(price_cents)}   •   "
-            f"Commission : {self._format_rate(rate)}   •   "
+            f"{commission_label} : {self._format_rate(rate)}   •   "
             f"Montant potentiel : {self._format_euro(commission_cents)}"
+            f"{beneficiary_suffix}"
         )
-        self.save_button.setEnabled(bool(self.prospects))
+        self.save_button.setEnabled(bool(self.prospects and self.trainings))
 
     def _save(self) -> None:
         prospect = self.prospect_combo.currentData()

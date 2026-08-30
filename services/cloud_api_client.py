@@ -1228,6 +1228,21 @@ class CloudAPIClient:
             )
         return payload
 
+    def preview_cloud_sale_commission(
+        self,
+        payload: dict,
+    ) -> dict[str, Any]:
+        result = self.post_json(
+            "/sales/commission-preview",
+            payload,
+            expected=(200,),
+        )
+        if not isinstance(result, dict):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné un aperçu de commission invalide."
+            )
+        return result
+
     def create_cloud_sale(
         self,
         payload: dict,
