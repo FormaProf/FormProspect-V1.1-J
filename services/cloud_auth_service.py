@@ -31,6 +31,7 @@ ROLE_LABELS = {
     "commercial": "Commercial",
     "trainer": "Formateur",
     "admin_assistant": "Assistant administratif",
+    "foreign_director": "Dirigeant hors France",
 }
 
 
@@ -89,6 +90,7 @@ class CloudAuthService:
             users.append(
                 {
                     'id': str(item.get('id') or ''),
+                    'user_id': str(item.get('user_id') or ''),
                     'username': email,
                     'first_name': str(item.get('first_name') or ''),
                     'last_name': str(item.get('last_name') or ''),
@@ -99,6 +101,8 @@ class CloudAuthService:
                     'last_login': str(item.get('last_login') or '') or None,
                     'last_seen_at': str(item.get('last_seen_at') or '') or None,
                     'presence_status': str(item.get('presence_status') or 'offline'),
+                    'commercial_partner_id': str(item.get('commercial_partner_id') or '') or None,
+                    'manager_user_id': str(item.get('manager_user_id') or '') or None,
                 }
             )
         return users
@@ -208,6 +212,84 @@ class CloudAuthService:
             )
         return payload
 
+    def list_commercial_partners(self) -> list[dict]:
+        if self.current_user is None:
+            return []
+        payload = self.api.get_json("/admin/partners")
+        if not isinstance(payload, list):
+            raise CloudAuthError(
+                "Form@Prospect Cloud a retourné une liste de partenaires invalide."
+            )
+        return [item for item in payload if isinstance(item, dict)]
+
+    def create_commercial_partner(self, payload: dict) -> dict:
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+        result = self.api.post_json("/admin/partners", payload, expected=(201,))
+        if not isinstance(result, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirmé la création du partenaire."
+            )
+        return result
+
+    def update_commercial_partner(self, partner_id: str, payload: dict) -> dict:
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+        result = self.api.patch_json(
+            f"/admin/partners/{str(partner_id).strip()}", payload
+        )
+        if not isinstance(result, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirmé la modification du partenaire."
+            )
+        return result
+
+    def set_commercial_partner_team(
+        self,
+        partner_id: str,
+        *,
+        director_user_id: str,
+        commercial_user_ids: list[str],
+    ) -> dict:
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+        result = self.api.request(
+            "PUT",
+            f"/admin/partners/{str(partner_id).strip()}/team",
+            json={
+                "director_user_id": str(director_user_id).strip(),
+                "commercial_user_ids": [str(value).strip() for value in commercial_user_ids],
+            },
+            expected=(200,),
+        )
+        try:
+            payload = result.json()
+        except (AttributeError, ValueError) as exc:
+            raise CloudAuthError(
+                "Form@Prospect Cloud a retourné une équipe partenaire invalide."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud a retourné une équipe partenaire invalide."
+            )
+        return payload
+
+    def license_info(self) -> dict:
+        """Retourne la licence de l'organisation Cloud active.
+
+        Ne jamais retomber sur la licence SQLite locale : son ancien
+        ``max_users=10`` n'a aucune autorité sur les comptes Cloud.
+        """
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        payload = self.api.get_json("/admin/license")
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud a retourné une licence invalide."
+            )
+        return payload
+
     def set_active(self, membership_id: str, active: bool) -> dict:
         if self.current_user is None:
             raise CloudAuthError("Session utilisateur indisponible.")
@@ -219,6 +301,25 @@ class CloudAuthService:
         if not isinstance(payload, dict):
             raise CloudAuthError(
                 "Form@Prospect Cloud n'a pas confirmé la modification du compte."
+            )
+        return payload
+
+    def set_role(self, membership_id: str, role: str) -> dict:
+        """Modifie le rôle Cloud d'un membre de l'organisation.
+
+        Le Backend reste l'autorité finale pour les permissions, la protection
+        du dernier administrateur et la cohérence hiérarchique.
+        """
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        payload = self.api.patch_json(
+            f"/admin/users/{str(membership_id).strip()}",
+            {"role": self._cloud_role_value(role)},
+        )
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirmé la modification du rôle."
             )
         return payload
 
@@ -301,11 +402,7 @@ class CloudAuthService:
         """Envoie uniquement le signe de vie du poste, sans recharger l'identité."""
         if self.session is None or self.current_user is None:
             return
-        if self.session.expires_at <= datetime.now(timezone.utc) + timedelta(minutes=2):
-            self._refresh(
-                self.session.refresh_token,
-                remember_session=self._has_saved_session(),
-            )
+        self.ensure_session_fresh(margin_seconds=120)
         self.api.post_json(
             "/identity/heartbeat",
             self._presence_payload(),
@@ -315,8 +412,7 @@ class CloudAuthService:
     def heartbeat(self) -> AuthenticatedUser:
         if self.session is None:
             raise CloudAuthError("Aucune session Cloud active.")
-        if self.session.expires_at <= datetime.now(timezone.utc) + timedelta(minutes=2):
-            self._refresh(self.session.refresh_token, remember_session=self._has_saved_session())
+        self.ensure_session_fresh(margin_seconds=120)
         return self._load_authorized_identity()
 
     def logout(self) -> None:
@@ -358,6 +454,23 @@ class CloudAuthService:
         )
         self._raise_auth_error(response)
 
+    def refresh_session(self) -> None:
+        """Renew the active Supabase session without changing the active organization."""
+        if self.session is None or not self.session.refresh_token:
+            raise CloudAuthError("Aucune session Cloud renouvelable n'est disponible.")
+        self._refresh(
+            self.session.refresh_token,
+            remember_session=self._has_saved_session(),
+        )
+
+    def ensure_session_fresh(self, *, margin_seconds: int = 120) -> None:
+        """Refresh shortly before expiry so normal API calls stay transparent."""
+        if self.session is None:
+            raise CloudAuthError("Aucune session Cloud active.")
+        margin = max(0, int(margin_seconds))
+        if self.session.expires_at <= datetime.now(timezone.utc) + timedelta(seconds=margin):
+            self.refresh_session()
+
     def _refresh(self, refresh_token: str, *, remember_session: bool) -> None:
         response = requests.post(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=refresh_token",
@@ -375,10 +488,16 @@ class CloudAuthService:
             expires_in = int(payload.get("expires_in", 3600))
         except (KeyError, TypeError, ValueError) as exc:
             raise CloudAuthError("Réponse d'authentification incomplète.") from exc
+        # A token refresh must never lose the tenant selected during login.
+        previous_organization_id = self.session.organization_id if self.session else ""
+        if not previous_organization_id and self.current_user is not None:
+            previous_organization_id = str(self.current_user.organization_id or "")
+
         self.session = CloudSession(
             access_token=access_token,
             refresh_token=refresh_token,
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+            organization_id=previous_organization_id,
         )
         if remember_session:
             self._save_refresh_token(refresh_token)

@@ -12,6 +12,7 @@ class CloudUserDialog(QDialog):
     ROLES = (
         ("Commercial", "Commercial"),
         ("Manager", "Manager"),
+        ("Dirigeant hors France", "Dirigeant hors France"),
         ("Administrateur", "Administrateur"),
         ("Formateur", "Formateur"),
         ("Assistant administratif", "Assistant administratif"),

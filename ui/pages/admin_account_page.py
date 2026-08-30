@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -24,6 +25,7 @@ from services.auth_service import AuthService
 from ui.components.notifications import NotificationManager
 from ui.dialogs.user_dialog import UserDialog
 from ui.dialogs.cloud_user_dialog import CloudUserDialog
+from ui.dialogs.commercial_partner_dialog import CommercialPartnerDialog
 
 
 class AdminAccountPage(QWidget):
@@ -119,7 +121,7 @@ class AdminAccountPage(QWidget):
         row.addWidget(self._kpi_card("Comptes actifs", "0", "users", "◉"), 1)
         row.addWidget(self._kpi_card("Connectés", "0", "online", "●"), 1)
         row.addWidget(self._kpi_card("Administrateurs", "0", "admins", "◆"), 1)
-        row.addWidget(self._kpi_card("Managers", "0", "managers", "◇"), 1)
+        row.addWidget(self._kpi_card("Head of Sales", "0", "managers", "◇"), 1)
         row.addWidget(self._kpi_card("Commerciaux", "0", "commercials", "▲"), 1)
 
         return row
@@ -227,13 +229,13 @@ class AdminAccountPage(QWidget):
         self.search.setObjectName("SearchInput")
         self.search.setPlaceholderText("Rechercher un membre...")
         self.search.setFixedWidth(280)
-        self.search.textChanged.connect(self._filter)
+        self.search.textChanged.connect(self._apply_filters)
         top.addWidget(self.search)
 
-        add = QPushButton("＋ Ajouter un utilisateur")
-        add.setObjectName("PrimaryButton")
-        add.clicked.connect(self._add_user)
-        top.addWidget(add)
+        self.add_user_button = QPushButton("＋ Ajouter un utilisateur")
+        self.add_user_button.setObjectName("PrimaryButton")
+        self.add_user_button.clicked.connect(self._add_user)
+        top.addWidget(self.add_user_button)
 
         layout.addLayout(top)
 
@@ -256,6 +258,58 @@ class AdminAccountPage(QWidget):
 
         layout.addWidget(info_bar)
 
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+
+        filter_label = QLabel("Filtrer :")
+        filter_label.setObjectName("FilterLabel")
+        filter_row.addWidget(filter_label)
+
+        self.role_filter = QComboBox()
+        self.role_filter.setObjectName("FilterCombo")
+        self.role_filter.setFixedWidth(190)
+        self.role_filter.addItem("Tous les rôles", "")
+        self.role_filter.addItem("Administrateur", "Administrateur")
+        self.role_filter.addItem("Head of Sales", "Head of Sales")
+        self.role_filter.addItem("Dirigeant hors France", "Dirigeant hors France")
+        self.role_filter.addItem("Commercial", "Commercial")
+        self.role_filter.addItem("Formateur", "Formateur")
+        self.role_filter.addItem("Assistant administratif", "Assistant administratif")
+        self.role_filter.currentIndexChanged.connect(self._apply_filters)
+        filter_row.addWidget(self.role_filter)
+
+        self.status_filter = QComboBox()
+        self.status_filter.setObjectName("FilterCombo")
+        self.status_filter.setFixedWidth(150)
+        self.status_filter.addItem("Tous les statuts", "")
+        self.status_filter.addItem("Actif", "Actif")
+        self.status_filter.addItem("Inactif", "Inactif")
+        self.status_filter.currentIndexChanged.connect(self._apply_filters)
+        filter_row.addWidget(self.status_filter)
+
+        self.presence_filter = QComboBox()
+        self.presence_filter.setObjectName("FilterCombo")
+        self.presence_filter.setFixedWidth(170)
+        self.presence_filter.addItem("Toutes les présences", "")
+        self.presence_filter.addItem("En ligne", "online")
+        self.presence_filter.addItem("Inactif", "idle")
+        self.presence_filter.addItem("Hors ligne", "offline")
+        self.presence_filter.currentIndexChanged.connect(self._apply_filters)
+        filter_row.addWidget(self.presence_filter)
+
+        reset_filters = QPushButton("Réinitialiser")
+        reset_filters.setObjectName("GhostButton")
+        reset_filters.clicked.connect(self._reset_filters)
+        filter_row.addWidget(reset_filters)
+
+        filter_row.addStretch(1)
+
+        self.filter_result = QLabel("0 membre affiché")
+        self.filter_result.setObjectName("FilterResult")
+        filter_row.addWidget(self.filter_result)
+
+        layout.addLayout(filter_row)
+
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
@@ -267,8 +321,25 @@ class AdminAccountPage(QWidget):
         reset.setObjectName("SecondaryButton")
         reset.clicked.connect(self._reset_password)
 
+        self.promote_button = QPushButton("Promouvoir")
+        self.promote_button.setObjectName("PromoteButton")
+        self.promote_button.setEnabled(False)
+        self.promote_button.setToolTip(
+            "Sélectionnez un commercial actif à promouvoir en Head of Sales."
+        )
+        self.promote_button.clicked.connect(self._promote_user)
+
+        self.partners_button = QPushButton("Partenaires hors France")
+        self.partners_button.setObjectName("SecondaryButton")
+        self.partners_button.setToolTip(
+            "Créer une structure commerciale étrangère et rattacher son dirigeant et ses setters."
+        )
+        self.partners_button.clicked.connect(self._open_commercial_partners)
+
         action_row.addWidget(toggle)
         action_row.addWidget(reset)
+        action_row.addWidget(self.promote_button)
+        action_row.addWidget(self.partners_button)
         action_row.addStretch(1)
 
         layout.addLayout(action_row)
@@ -295,6 +366,7 @@ class AdminAccountPage(QWidget):
         self.table.setShowGrid(False)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setWordWrap(False)
+        self.table.itemSelectionChanged.connect(self._update_promote_button)
 
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
@@ -338,6 +410,11 @@ class AdminAccountPage(QWidget):
             "offline": "●  Hors ligne",
         }
         return mapping.get(str(value or "").strip().lower(), "●  Hors ligne")
+
+    @staticmethod
+    def _display_role(value: str) -> str:
+        """Conserve le rôle technique Manager mais affiche son intitulé métier."""
+        return "Head of Sales" if str(value or "").strip() == "Manager" else str(value or "")
 
     def _refresh_if_visible(self):
         if self.isVisible() and SessionState.has_role("Administrateur"):
@@ -390,12 +467,59 @@ class AdminAccountPage(QWidget):
             + ("s actifs" if active != 1 else " actif")
         )
 
-        licence = self.auth_service.license_info()
-        self.license_text.setText(
-            f"◆  Licence {licence.get('plan', '—')}   •   "
-            f"{licence.get('status', '—')}   •   "
-            f"{active}/{licence.get('max_users', '—')} comptes utilisés"
-        )
+        try:
+            licence = self.auth_service.license_info()
+        except Exception as exc:
+            self.license_text.setText("◆  Licence Cloud indisponible")
+            self.add_user_button.setEnabled(False)
+            self.add_user_button.setToolTip(str(exc))
+        else:
+            plan_label = str(
+                licence.get("plan_label")
+                or licence.get("plan")
+                or "—"
+            ).strip()
+            status_value = str(licence.get("status") or "—").strip()
+            status_label = (
+                status_value[:1].upper() + status_value[1:]
+                if status_value
+                else "—"
+            )
+            unlimited = bool(licence.get("unlimited", False))
+            max_users = licence.get("max_users")
+
+            if unlimited:
+                self.license_text.setText(
+                    f"◆  Licence {plan_label}   •   {status_label}   •   "
+                    f"{active} compte"
+                    + ("s actifs" if active != 1 else " actif")
+                    + "   •   Illimité"
+                )
+            else:
+                self.license_text.setText(
+                    f"◆  Licence {plan_label}   •   {status_label}   •   "
+                    f"{active}/{max_users if max_users is not None else '—'} comptes utilisés"
+                )
+
+            # Le Backend reste l'autorité finale. L'état du bouton est seulement
+            # un retour UX immédiat pour les futures licences limitées.
+            if "can_add_user" in licence:
+                can_add_user = bool(licence.get("can_add_user"))
+                self.add_user_button.setEnabled(can_add_user)
+                if can_add_user:
+                    self.add_user_button.setText("＋ Ajouter un utilisateur")
+                    self.add_user_button.setToolTip("")
+                else:
+                    self.add_user_button.setText("Limite de licences atteinte")
+                    self.add_user_button.setToolTip(
+                        "Désactivez un compte ou augmentez le nombre de licences "
+                        "avant d'ajouter un nouvel utilisateur."
+                    )
+            else:
+                # Compatibilité du mode local historique.
+                self.add_user_button.setEnabled(True)
+                self.add_user_button.setText("＋ Ajouter un utilisateur")
+                self.add_user_button.setToolTip("")
 
         self.table.setRowCount(len(users))
 
@@ -419,7 +543,7 @@ class AdminAccountPage(QWidget):
                 user["id"],
                 full_name,
                 user["email"],
-                user["role"],
+                self._display_role(user["role"]),
                 "Actif" if user["active"] else "Inactif",
                 self._presence_label(user.get("presence_status", "offline")),
                 self._format_cloud_datetime(user.get("last_login")),
@@ -441,7 +565,7 @@ class AdminAccountPage(QWidget):
                         PRIMARY
                         if value == "Administrateur"
                         else "#7C3AED"
-                        if value == "Manager"
+                        if value == "Head of Sales"
                         else "#0F766E"
                     )
                     item.setForeground(QColor(role_color))
@@ -468,36 +592,203 @@ class AdminAccountPage(QWidget):
 
                 self.table.setItem(row, column, item)
 
-        self._filter(self.search.text())
+        self._apply_filters()
 
-    def _filter(self, text):
-        query = text.strip().lower()
+    @staticmethod
+    def _normalized_presence(value: str) -> str:
+        text = str(value or "").strip().lower()
+        if "en ligne" in text:
+            return "online"
+        if "inactif" in text:
+            return "idle"
+        return "offline"
+
+    def _apply_filters(self, *_args):
+        query = self.search.text().strip().lower()
+        role_filter = str(self.role_filter.currentData() or "").strip().lower()
+        status_filter = str(self.status_filter.currentData() or "").strip().lower()
+        presence_filter = str(self.presence_filter.currentData() or "").strip().lower()
+
+        visible_count = 0
 
         for row in range(self.table.rowCount()):
+            def cell(column: int) -> str:
+                item = self.table.item(row, column)
+                return item.text().strip() if item else ""
+
             searchable = " ".join(
-                self.table.item(row, column).text()
-                if self.table.item(row, column)
-                else ""
+                cell(column)
                 for column in range(1, self.table.columnCount())
             ).lower()
 
-            self.table.setRowHidden(row, query not in searchable)
+            role_value = cell(3).lower()
+            status_value = cell(4).lower()
+            presence_value = self._normalized_presence(cell(5))
 
-    def _selected_user(self):
+            matches_search = not query or query in searchable
+            matches_role = not role_filter or role_value == role_filter
+            matches_status = not status_filter or status_value == status_filter
+            matches_presence = (
+                not presence_filter or presence_value == presence_filter
+            )
+
+            visible = (
+                matches_search
+                and matches_role
+                and matches_status
+                and matches_presence
+            )
+            self.table.setRowHidden(row, not visible)
+            if visible:
+                visible_count += 1
+
+        self.filter_result.setText(
+            f"{visible_count} membre"
+            + ("s" if visible_count != 1 else "")
+            + " affiché"
+            + ("s" if visible_count != 1 else "")
+        )
+
+        current_row = self.table.currentRow()
+        if current_row >= 0 and self.table.isRowHidden(current_row):
+            self.table.clearSelection()
+        self._update_promote_button()
+
+    def _filter(self, _text=""):
+        """Compatibilité avec les anciens appels internes."""
+        self._apply_filters()
+
+    def _reset_filters(self):
+        self.search.clear()
+        self.role_filter.setCurrentIndex(0)
+        self.status_filter.setCurrentIndex(0)
+        self.presence_filter.setCurrentIndex(0)
+        self._apply_filters()
+
+    def _selected_user_details(self, *, show_message: bool = True):
         row = self.table.currentRow()
 
-        if row < 0:
-            QMessageBox.information(
-                self,
-                "Utilisateur",
-                "Sélectionnez un utilisateur.",
-            )
+        if row < 0 or self.table.isRowHidden(row):
+            if show_message:
+                QMessageBox.information(
+                    self,
+                    "Utilisateur",
+                    "Sélectionnez un utilisateur.",
+                )
             return None
 
-        return (
-            self.table.item(row, 0).text(),
-            self.table.item(row, 4).text() == "Actif",
+        def cell(column: int) -> str:
+            item = self.table.item(row, column)
+            return item.text().strip() if item else ""
+
+        return {
+            "id": cell(0),
+            "name": cell(1),
+            "email": cell(2),
+            "role": cell(3),
+            "active": cell(4) == "Actif",
+        }
+
+    def _selected_user(self):
+        details = self._selected_user_details()
+        if details is None:
+            return None
+        return details["id"], details["active"]
+
+    def _update_promote_button(self):
+        if not hasattr(self, "promote_button"):
+            return
+
+        if not getattr(self.auth_service, "is_cloud", False):
+            self.promote_button.setVisible(False)
+            return
+
+        self.promote_button.setVisible(True)
+        details = self._selected_user_details(show_message=False)
+        enabled = bool(
+            details
+            and details["role"] == "Commercial"
+            and details["active"]
         )
+        self.promote_button.setEnabled(enabled)
+
+        if enabled:
+            self.promote_button.setToolTip(
+                f"Promouvoir {details['name']} en Head of Sales."
+            )
+        elif details and details["role"] == "Commercial" and not details["active"]:
+            self.promote_button.setToolTip(
+                "Activez d'abord ce compte avant de le promouvoir."
+            )
+        elif details and details["role"] == "Head of Sales":
+            self.promote_button.setToolTip("Ce membre est déjà Head of Sales.")
+        else:
+            self.promote_button.setToolTip(
+                "Sélectionnez un commercial actif à promouvoir en Head of Sales."
+            )
+
+    def _promote_user(self):
+        details = self._selected_user_details()
+        if details is None:
+            return
+
+        if details["role"] != "Commercial":
+            QMessageBox.information(
+                self,
+                "Promotion",
+                "Seul un commercial peut être promu en Head of Sales depuis cette action.",
+            )
+            return
+
+        if not details["active"]:
+            QMessageBox.information(
+                self,
+                "Promotion",
+                "Activez d'abord ce compte avant de le promouvoir.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Promouvoir en Head of Sales",
+            (
+                f"Promouvoir {details['name']} en Head of Sales ?\n\n"
+                "Son rôle Cloud passera de Commercial à Manager. Il disposera "
+                "des droits de supervision de l'activité commerciale et pourra "
+                "encadrer des commerciaux.\n\n"
+                "Le changement de droits est immédiat côté Cloud."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        try:
+            self.auth_service.set_role(details["id"], "Manager")
+            self.rafraichir()
+            NotificationManager.success(
+                "Promotion effectuée",
+                f"{details['name']} est désormais Head of Sales.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Promotion impossible",
+                str(exc),
+            )
+
+    def _open_commercial_partners(self):
+        if not getattr(self.auth_service, "is_cloud", False):
+            QMessageBox.information(
+                self,
+                "Partenaires Cloud",
+                "La gestion des partenaires commerciaux est disponible uniquement en mode Cloud.",
+            )
+            return
+        dialog = CommercialPartnerDialog(self.auth_service, self)
+        dialog.exec()
+        self.rafraichir()
 
     def _add_user(self):
         dialog = (
@@ -793,6 +1084,56 @@ class AdminAccountPage(QWidget):
                 font-weight: 800;
             }}
 
+            QLabel#FilterLabel {{
+                color: #475569;
+                font-size: 10px;
+                font-weight: 800;
+                padding-right: 2px;
+            }}
+
+            QLabel#FilterResult {{
+                color: #64748B;
+                font-size: 9px;
+                font-weight: 700;
+                padding: 0 4px;
+            }}
+
+            QComboBox#FilterCombo {{
+                min-height: 34px;
+                padding: 0 30px 0 11px;
+                background: #F8FAFC;
+                color: {TEXT};
+                border: 1px solid {BORDER};
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: 700;
+            }}
+
+            QComboBox#FilterCombo:hover {{
+                background: white;
+                border-color: #B8C8D9;
+            }}
+
+            QComboBox#FilterCombo:focus {{
+                background: white;
+                border: 1px solid {PRIMARY};
+            }}
+
+            QComboBox#FilterCombo::drop-down {{
+                width: 28px;
+                border: none;
+                background: transparent;
+            }}
+
+            QComboBox#FilterCombo QAbstractItemView {{
+                background: white;
+                color: {TEXT};
+                border: 1px solid {BORDER};
+                selection-background-color: #EEF6FF;
+                selection-color: {TEXT};
+                outline: none;
+            }}
+
             QLineEdit#SearchInput {{
                 min-height: 38px;
                 padding: 0 12px;
@@ -821,6 +1162,28 @@ class AdminAccountPage(QWidget):
 
             QPushButton#PrimaryButton:hover {{
                 background: {PRIMARY_DARK};
+            }}
+
+            QPushButton#PromoteButton {{
+                min-height: 34px;
+                padding: 0 14px;
+                background: #EAF4FF;
+                color: {PRIMARY};
+                border: 1px solid #B9DCFF;
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: 800;
+            }}
+
+            QPushButton#PromoteButton:hover {{
+                background: #DCEEFF;
+                border-color: {PRIMARY};
+            }}
+
+            QPushButton#PromoteButton:disabled {{
+                background: #F1F5F9;
+                color: #94A3B8;
+                border-color: #E2E8F0;
             }}
 
             QPushButton#SecondaryButton,

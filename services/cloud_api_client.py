@@ -93,6 +93,36 @@ class CloudAPIClient:
 
         return headers
 
+    def _ensure_fresh_session(self) -> None:
+        """Refresh an access token shortly before expiry, when supported."""
+        ensure = getattr(self.auth_service, "ensure_session_fresh", None)
+        if ensure is None:
+            return
+        try:
+            ensure(margin_seconds=120)
+        except Exception as exc:
+            raise CloudAPIError(
+                "Votre session Cloud n'a pas pu être renouvelée. "
+                "Veuillez vous reconnecter.",
+                status_code=401,
+            ) from exc
+
+    def _refresh_after_401(self) -> None:
+        """Perform exactly one token refresh before retrying an unauthorized call."""
+        refresh = getattr(self.auth_service, "refresh_session", None)
+        if refresh is None:
+            raise CloudAPIError(
+                "Votre session Cloud a expiré. Reconnectez-vous.",
+                status_code=401,
+            )
+        try:
+            refresh()
+        except Exception as exc:
+            raise CloudAPIError(
+                "Votre session Cloud a expiré. Veuillez vous reconnecter.",
+                status_code=401,
+            ) from exc
+
     def request(
         self,
         method: str,
@@ -102,24 +132,34 @@ class CloudAPIClient:
         json=None,
         expected=(200,),
     ) -> requests.Response:
-        try:
-            response = self.http.request(
-                method,
-                f"{self.base_url}/{path.lstrip('/')}",
-                headers=self._headers(),
-                params=params,
-                json=json,
-                timeout=self.timeout,
-            )
+        self._ensure_fresh_session()
 
-        except requests.RequestException as exc:
-            raise CloudAPIError(
-                "Impossible de joindre Form@Prospect Cloud. "
-                "Vérifiez votre connexion."
-            ) from exc
+        response = None
+        for attempt in range(2):
+            try:
+                response = self.http.request(
+                    method,
+                    f"{self.base_url}/{path.lstrip('/')}",
+                    headers=self._headers(),
+                    params=params,
+                    json=json,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as exc:
+                raise CloudAPIError(
+                    "Impossible de joindre Form@Prospect Cloud. "
+                    "Vérifiez votre connexion."
+                ) from exc
 
-        if response.status_code in expected:
-            return response
+            if response.status_code in expected:
+                return response
+
+            if response.status_code == 401 and attempt == 0:
+                self._refresh_after_401()
+                continue
+            break
+
+        assert response is not None
 
         message = None
 
@@ -596,38 +636,49 @@ class CloudAPIClient:
         if not source.is_file():
             raise CloudAPIError(f"Le fichier est introuvable : {source}")
 
-        headers = self._headers()
-        headers.pop("Content-Type", None)
+        self._ensure_fresh_session()
         mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
 
-        try:
-            with source.open("rb") as handle:
-                response = self.http.request(
-                    method,
-                    f"{self.base_url}/{path.lstrip('/')}",
-                    headers=headers,
-                    data=data,
-                    files={
-                        "file": (
-                            source.name,
-                            handle,
-                            mime_type,
-                        )
-                    },
-                    timeout=max(self.timeout, 60),
-                )
-        except (OSError, requests.RequestException) as exc:
-            raise CloudAPIError(
-                "Impossible d'envoyer le document à Form@Prospect Cloud."
-            ) from exc
+        response = None
+        for attempt in range(2):
+            headers = self._headers()
+            headers.pop("Content-Type", None)
+            try:
+                # Re-open the file for a retry so the upload restarts from byte 0.
+                with source.open("rb") as handle:
+                    response = self.http.request(
+                        method,
+                        f"{self.base_url}/{path.lstrip('/')}",
+                        headers=headers,
+                        data=data,
+                        files={
+                            "file": (
+                                source.name,
+                                handle,
+                                mime_type,
+                            )
+                        },
+                        timeout=max(self.timeout, 60),
+                    )
+            except (OSError, requests.RequestException) as exc:
+                raise CloudAPIError(
+                    "Impossible d'envoyer le document à Form@Prospect Cloud."
+                ) from exc
 
-        if response.status_code in expected:
-            payload = response.json()
-            if isinstance(payload, dict):
-                return payload
-            raise CloudAPIError(
-                "Form@Prospect Cloud a retourné une réponse documentaire invalide."
-            )
+            if response.status_code in expected:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    return payload
+                raise CloudAPIError(
+                    "Form@Prospect Cloud a retourné une réponse documentaire invalide."
+                )
+
+            if response.status_code == 401 and attempt == 0:
+                self._refresh_after_401()
+                continue
+            break
+
+        assert response is not None
 
         message = None
         try:
