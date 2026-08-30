@@ -64,8 +64,36 @@ def build_invoice_html(invoice: dict) -> str:
             "</tr>"
         )
 
+    tax_version = int(invoice.get("tax_calculation_version") or 1)
     vat_mention = _safe(invoice.get("seller_vat_mention"))
-    vat_html = f"<p><b>TVA :</b> {vat_mention}</p>" if vat_mention else ""
+
+    if tax_version >= 2:
+        total_ht_cents = int(invoice.get("total_ht_cents") or 0)
+        vat_cents = int(invoice.get("vat_cents") or 0)
+        total_ttc_cents = int(invoice.get("total_cents") or 0)
+        try:
+            vat_rate = float(invoice.get("seller_vat_rate") or 0)
+        except (TypeError, ValueError):
+            vat_rate = 0.0
+        totals_html = (
+            "<table class='totals'>"
+            f"<tr><td>TOTAL HT</td><td><b>{_euro(total_ht_cents)}</b></td></tr>"
+            f"<tr><td>TVA {vat_rate:g} %</td><td><b>{_euro(vat_cents)}</b></td></tr>"
+            f"<tr class='grand'><td>TOTAL TTC</td><td><b>{_euro(total_ttc_cents)}</b></td></tr>"
+            "</table>"
+        )
+        vat_html = (
+            f"<p><b>Mention TVA :</b> {vat_mention}</p>" if vat_mention else ""
+        )
+        commission_heading = "Commission HT"
+    else:
+        # Factures historiques : préserver l'ancien rendu et ne jamais leur
+        # appliquer rétroactivement le régime fiscal actuel du commercial.
+        totals_html = (
+            f"<p class='total'>TOTAL À PAYER : {_euro(int(invoice.get('total_cents') or 0))}</p>"
+        )
+        vat_html = f"<p><b>TVA :</b> {vat_mention}</p>" if vat_mention else ""
+        commission_heading = "Commission"
 
     return f"""
     <html>
@@ -81,6 +109,10 @@ def build_invoice_html(invoice: dict) -> str:
         table.lines th {{ background:#EEF6FF; color:#123B63; padding:7px; border:1px solid #D9E8F5; }}
         table.lines td {{ padding:7px; border:1px solid #E5E7EB; }}
         .total {{ text-align:right; font-size:15pt; font-weight:bold; margin-top:16px; }}
+        table.totals {{ width:44%; margin-left:56%; margin-top:16px; border-collapse:collapse; }}
+        table.totals td {{ padding:5px 4px; text-align:right; }}
+        table.totals td:first-child {{ text-align:left; }}
+        table.totals tr.grand td {{ border-top:2px solid #123B63; font-size:15pt; padding-top:8px; }}
         .footer {{ margin-top:26px; color:#6B7280; font-size:9pt; }}
       </style>
     </head>
@@ -109,12 +141,12 @@ def build_invoice_html(invoice: dict) -> str:
           <th>Client</th>
           <th>Formation</th>
           <th>Taux</th>
-          <th>Commission</th>
+          <th>{commission_heading}</th>
         </tr>
         {"".join(rows)}
       </table>
 
-      <p class="total">TOTAL À PAYER : {_euro(int(invoice.get('total_cents') or 0))}</p>
+      {totals_html}
       {vat_html}
       <p>Modalité de règlement : virement bancaire selon le cycle mensuel convenu.</p>
       <div class="footer">

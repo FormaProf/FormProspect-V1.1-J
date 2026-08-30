@@ -61,7 +61,7 @@ class CommissionInvoicesDialog(QDialog):
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
             ["N° facture", "Période", "Émission", "Paiement prévu",
-             "Commissions", "Montant", "Statut"]
+             "Commissions", "À payer", "Statut"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
@@ -130,6 +130,12 @@ class CommissionInvoicesDialog(QDialog):
                 item = QTableWidgetItem(str(value))
                 if c in (4, 5, 6):
                     item.setTextAlignment(Qt.AlignCenter)
+                if c == 5 and int(invoice.get("tax_calculation_version") or 1) >= 2:
+                    item.setToolTip(
+                        "HT : " + self._euro(invoice.get("total_ht_cents") or 0)
+                        + "\nTVA : " + self._euro(invoice.get("vat_cents") or 0)
+                        + "\nTTC : " + self._euro(invoice.get("total_cents") or 0)
+                    )
                 self.table.setItem(r, c, item)
         self.status.setText(f"{len(self.rows)} facture(s) enregistrée(s).")
 
