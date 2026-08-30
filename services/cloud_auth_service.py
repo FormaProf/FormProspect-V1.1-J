@@ -290,6 +290,49 @@ class CloudAuthService:
             )
         return payload
 
+    def portfolio_transfer_preview(self, membership_id: str) -> dict:
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        membership_id = str(membership_id or "").strip()
+        if not membership_id:
+            raise ValueError("Le commercial source est obligatoire.")
+
+        payload = self.api.get_json(
+            f"/admin/users/{membership_id}/portfolio-transfer-preview"
+        )
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud a retourné un aperçu de portefeuille invalide."
+            )
+        return payload
+
+    def transfer_portfolio(
+        self,
+        membership_id: str,
+        target_user_id: str,
+    ) -> dict:
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        membership_id = str(membership_id or "").strip()
+        target_user_id = str(target_user_id or "").strip()
+        if not membership_id:
+            raise ValueError("Le commercial source est obligatoire.")
+        if not target_user_id:
+            raise ValueError("Le commercial destinataire est obligatoire.")
+
+        payload = self.api.post_json(
+            f"/admin/users/{membership_id}/portfolio-transfer",
+            {"target_user_id": target_user_id},
+            expected=(200,),
+        )
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirmé le transfert du portefeuille."
+            )
+        return payload
+
     def set_active(self, membership_id: str, active: bool) -> dict:
         if self.current_user is None:
             raise CloudAuthError("Session utilisateur indisponible.")

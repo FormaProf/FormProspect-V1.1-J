@@ -26,6 +26,7 @@ from ui.components.notifications import NotificationManager
 from ui.dialogs.user_dialog import UserDialog
 from ui.dialogs.cloud_user_dialog import CloudUserDialog
 from ui.dialogs.commercial_partner_dialog import CommercialPartnerDialog
+from ui.dialogs.portfolio_transfer_dialog import PortfolioTransferDialog
 
 
 class AdminAccountPage(QWidget):
@@ -329,6 +330,14 @@ class AdminAccountPage(QWidget):
         )
         self.promote_button.clicked.connect(self._promote_user)
 
+        self.transfer_portfolio_button = QPushButton("Transférer le portefeuille")
+        self.transfer_portfolio_button.setObjectName("TransferButton")
+        self.transfer_portfolio_button.setEnabled(False)
+        self.transfer_portfolio_button.setToolTip(
+            "Sélectionnez un commercial désactivé dont le portefeuille doit être repris."
+        )
+        self.transfer_portfolio_button.clicked.connect(self._transfer_portfolio)
+
         self.partners_button = QPushButton("Partenaires hors France")
         self.partners_button.setObjectName("SecondaryButton")
         self.partners_button.setToolTip(
@@ -339,6 +348,7 @@ class AdminAccountPage(QWidget):
         action_row.addWidget(toggle)
         action_row.addWidget(reset)
         action_row.addWidget(self.promote_button)
+        action_row.addWidget(self.transfer_portfolio_button)
         action_row.addWidget(self.partners_button)
         action_row.addStretch(1)
 
@@ -367,6 +377,7 @@ class AdminAccountPage(QWidget):
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setWordWrap(False)
         self.table.itemSelectionChanged.connect(self._update_promote_button)
+        self.table.itemSelectionChanged.connect(self._update_transfer_button)
 
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
@@ -653,6 +664,7 @@ class AdminAccountPage(QWidget):
         if current_row >= 0 and self.table.isRowHidden(current_row):
             self.table.clearSelection()
         self._update_promote_button()
+        self._update_transfer_button()
 
     def _filter(self, _text=""):
         """Compatibilité avec les anciens appels internes."""
@@ -726,6 +738,80 @@ class AdminAccountPage(QWidget):
             self.promote_button.setToolTip(
                 "Sélectionnez un commercial actif à promouvoir en Head of Sales."
             )
+
+    def _update_transfer_button(self):
+        if not hasattr(self, "transfer_portfolio_button"):
+            return
+
+        if not getattr(self.auth_service, "is_cloud", False):
+            self.transfer_portfolio_button.setVisible(False)
+            return
+
+        self.transfer_portfolio_button.setVisible(True)
+        details = self._selected_user_details(show_message=False)
+        enabled = bool(
+            details
+            and details["role"] == "Commercial"
+            and not details["active"]
+        )
+        self.transfer_portfolio_button.setEnabled(enabled)
+
+        if enabled:
+            self.transfer_portfolio_button.setToolTip(
+                f"Transférer le portefeuille de {details['name']} vers un autre commercial."
+            )
+        elif details and details["role"] == "Commercial" and details["active"]:
+            self.transfer_portfolio_button.setToolTip(
+                "Désactivez d'abord ce compte avant de transférer son portefeuille."
+            )
+        else:
+            self.transfer_portfolio_button.setToolTip(
+                "Sélectionnez un commercial désactivé dont le portefeuille doit être repris."
+            )
+
+    def _open_portfolio_transfer(self, details: dict):
+        dialog = PortfolioTransferDialog(
+            self.auth_service,
+            details["id"],
+            details.get("name") or "",
+            self,
+        )
+        if dialog.exec() and dialog.transfer_result:
+            result = dialog.transfer_result
+            self.rafraichir()
+            NotificationManager.success(
+                "Portefeuille transféré",
+                (
+                    f"{int(result.get('prospects_transferred') or 0)} prospect(s) "
+                    f"et {int(result.get('activities_transferred') or 0)} activité(s) "
+                    "planifiée(s) ont été réattribués."
+                ),
+            )
+            return True
+        return False
+
+    def _transfer_portfolio(self):
+        details = self._selected_user_details()
+        if details is None:
+            return
+
+        if details["role"] != "Commercial":
+            QMessageBox.information(
+                self,
+                "Transfert de portefeuille",
+                "Seul le portefeuille d'un Commercial peut être transféré.",
+            )
+            return
+
+        if details["active"]:
+            QMessageBox.information(
+                self,
+                "Transfert de portefeuille",
+                "Désactivez d'abord ce compte avant de transférer son portefeuille.",
+            )
+            return
+
+        self._open_portfolio_transfer(details)
 
     def _promote_user(self):
         details = self._selected_user_details()
@@ -812,18 +898,40 @@ class AdminAccountPage(QWidget):
                 )
 
     def _toggle_user(self):
-        selected = self._selected_user()
+        details = self._selected_user_details()
 
-        if not selected:
+        if details is None:
             return
 
+        new_active = not details["active"]
+
         try:
-            self.auth_service.set_active(selected[0], not selected[1])
+            self.auth_service.set_active(details["id"], new_active)
             self.rafraichir()
             NotificationManager.success(
                 "Compte mis à jour",
                 "Le statut de l'utilisateur a été modifié.",
             )
+
+            if (
+                getattr(self.auth_service, "is_cloud", False)
+                and details["role"] == "Commercial"
+                and not new_active
+            ):
+                answer = QMessageBox.question(
+                    self,
+                    "Compte commercial désactivé",
+                    (
+                        f"{details['name']} est maintenant désactivé.\n\n"
+                        "Souhaitez-vous transférer son portefeuille vers un autre "
+                        "Commercial actif maintenant ?"
+                    ),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if answer == QMessageBox.Yes:
+                    self._open_portfolio_transfer(details)
+
         except Exception as exc:
             QMessageBox.critical(self, "Modification impossible", str(exc))
 
@@ -1181,6 +1289,28 @@ class AdminAccountPage(QWidget):
             }}
 
             QPushButton#PromoteButton:disabled {{
+                background: #F1F5F9;
+                color: #94A3B8;
+                border-color: #E2E8F0;
+            }}
+
+            QPushButton#TransferButton {{
+                min-height: 34px;
+                padding: 0 14px;
+                background: #ECFDF5;
+                color: #047857;
+                border: 1px solid #A7F3D0;
+                border-radius: 9px;
+                font-size: 10px;
+                font-weight: 800;
+            }}
+
+            QPushButton#TransferButton:hover {{
+                background: #D1FAE5;
+                border-color: #34D399;
+            }}
+
+            QPushButton#TransferButton:disabled {{
                 background: #F1F5F9;
                 color: #94A3B8;
                 border-color: #E2E8F0;
