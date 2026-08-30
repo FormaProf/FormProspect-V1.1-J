@@ -24,6 +24,13 @@ class CommercialProfilesPage(QWidget):
         "employee": "Salarié",
     }
 
+    VAT_REGIME_LABELS = {
+        "unspecified": "À renseigner",
+        "franchise_base": "Franchise en base",
+        "vat_liable": "TVA applicable",
+        "exempt": "Exonéré",
+    }
+
     ROLE_LABELS = {
         "setter": "Setter",
         "closer": "Closer",
@@ -98,11 +105,11 @@ class CommercialProfilesPage(QWidget):
         info_layout.addWidget(note)
         root.addWidget(info)
 
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(
             [
                 "Commercial", "Fonction", "Statut", "E-mail / téléphone",
-                "SIRET", "Spécialités", "Diplômes / certifications",
+                "SIRET", "Régime TVA", "Spécialités", "Diplômes / certifications",
                 "Contrat", "État",
             ]
         )
@@ -160,10 +167,13 @@ class CommercialProfilesPage(QWidget):
         self.status_label.setStyleSheet(f"color:{MUTED};")
         self.table.setRowCount(len(self.rows))
         active_count = 0
+        vat_unspecified_count = 0
 
         for row_index, profile in enumerate(self.rows):
             active = bool(profile.get("active"))
             active_count += int(active)
+            vat_regime = str(profile.get("vat_regime") or "unspecified")
+            vat_unspecified_count += int(vat_regime == "unspecified")
             contact_parts = [
                 str(profile.get("email") or "").strip(),
                 str(profile.get("phone") or "").strip(),
@@ -186,6 +196,7 @@ class CommercialProfilesPage(QWidget):
                 ),
                 "\n".join(part for part in contact_parts if part) or "—",
                 profile.get("siret") or "—",
+                self.VAT_REGIME_LABELS.get(vat_regime, vat_regime),
                 profile.get("specialties") or "—",
                 qualifications or "—",
                 "Présent" if profile.get("contract_present") else "Manquant",
@@ -195,12 +206,13 @@ class CommercialProfilesPage(QWidget):
                 item = QTableWidgetItem(str(value))
                 item.setTextAlignment(
                     Qt.AlignVCenter |
-                    (Qt.AlignCenter if column in (7, 8) else Qt.AlignLeft)
+                    (Qt.AlignCenter if column in (5, 8, 9) else Qt.AlignLeft)
                 )
                 self.table.setItem(row_index, column, item)
 
         self.summary.setText(
-            f"{len(self.rows)} commercial(aux) — {active_count} actif(s)"
+            f"{len(self.rows)} commercial(aux) — {active_count} actif(s) — "
+            f"{vat_unspecified_count} régime(s) TVA à renseigner"
         )
         self.status_label.setText(
             "Double-cliquez sur une ligne pour consulter ou modifier la fiche."

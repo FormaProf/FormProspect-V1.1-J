@@ -5,7 +5,7 @@ import re
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDateEdit, QDialog, QFormLayout, QFrame,
+    QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QTextEdit, QVBoxLayout, QWidget,
 )
@@ -17,6 +17,8 @@ from services.cloud_api_client import CloudAPIError
 
 
 class CloudCommercialProfileDialog(QDialog):
+    FRANCHISE_BASE_VAT_MENTION = "TVA non applicable, art. 293 B du CGI"
+
     def __init__(self, api, parent=None, *, profile: dict | None = None):
         super().__init__(parent)
         self.api = api
@@ -107,8 +109,24 @@ class CloudCommercialProfileDialog(QDialog):
         self.billing_city = self._line("Ville")
         self.billing_country = self._line("France")
         self.billing_country.setText("France")
+
+        self.vat_regime = QComboBox()
+        self.vat_regime.setMinimumHeight(34)
+        self.vat_regime.addItem("À renseigner", "unspecified")
+        self.vat_regime.addItem("Franchise en base de TVA", "franchise_base")
+        self.vat_regime.addItem("Assujetti / redevable de la TVA", "vat_liable")
+        self.vat_regime.addItem("Exonéré de TVA", "exempt")
+
+        self.vat_rate = QDoubleSpinBox()
+        self.vat_rate.setMinimumHeight(34)
+        self.vat_rate.setRange(0.0, 100.0)
+        self.vat_rate.setDecimals(2)
+        self.vat_rate.setSingleStep(0.10)
+        self.vat_rate.setSuffix(" %")
+
         self.vat_number = self._line("N° TVA intracommunautaire si applicable")
-        self.vat_mention = self._line("Ex. TVA non applicable, art. 293 B du CGI")
+        self.vat_mention = self._line("Mention légale à faire figurer sur la facture")
+        self.vat_regime.currentIndexChanged.connect(self._update_vat_ui)
         self.specialties = QTextEdit()
         self.specialties.setMinimumHeight(54)
         self.specialties.setPlaceholderText(
@@ -158,6 +176,8 @@ class CloudCommercialProfileDialog(QDialog):
         form.addRow("Code postal", self.billing_postal_code)
         form.addRow("Ville", self.billing_city)
         form.addRow("Pays", self.billing_country)
+        form.addRow("Régime TVA", self.vat_regime)
+        form.addRow("Taux TVA", self.vat_rate)
         form.addRow("N° TVA", self.vat_number)
         form.addRow("Mention TVA", self.vat_mention)
         form.addRow("Spécialités", self.specialties)
@@ -190,6 +210,34 @@ class CloudCommercialProfileDialog(QDialog):
         actions.addWidget(cancel)
         actions.addWidget(self.save_button)
         root.addLayout(actions)
+        self._update_vat_ui()
+
+    def _update_vat_ui(self, *_args, apply_defaults: bool = True) -> None:
+        regime = str(self.vat_regime.currentData() or "unspecified")
+        liable = regime == "vat_liable"
+        self.vat_rate.setEnabled(liable)
+
+        if not liable:
+            self.vat_rate.setValue(0.0)
+        elif apply_defaults and self.vat_rate.value() <= 0:
+            self.vat_rate.setValue(20.0)
+
+        if regime == "franchise_base":
+            self.vat_mention.setPlaceholderText(self.FRANCHISE_BASE_VAT_MENTION)
+            if apply_defaults and not self.vat_mention.text().strip():
+                self.vat_mention.setText(self.FRANCHISE_BASE_VAT_MENTION)
+        elif regime == "exempt":
+            self.vat_mention.setPlaceholderText(
+                "Mention légale d'exonération obligatoire"
+            )
+        elif regime == "vat_liable":
+            self.vat_mention.setPlaceholderText(
+                "Mention complémentaire éventuelle"
+            )
+        else:
+            self.vat_mention.setPlaceholderText(
+                "Renseignez d'abord le régime de TVA"
+            )
 
     @staticmethod
     def _set_iso_date(check, editor, value) -> None:
@@ -225,8 +273,18 @@ class CloudCommercialProfileDialog(QDialog):
         self.billing_postal_code.setText(str(self.profile.get("billing_postal_code") or ""))
         self.billing_city.setText(str(self.profile.get("billing_city") or ""))
         self.billing_country.setText(str(self.profile.get("billing_country") or "France"))
+        vat_regime_index = self.vat_regime.findData(
+            str(self.profile.get("vat_regime") or "unspecified")
+        )
+        if vat_regime_index >= 0:
+            self.vat_regime.setCurrentIndex(vat_regime_index)
+        try:
+            self.vat_rate.setValue(float(self.profile.get("vat_rate") or 0))
+        except (TypeError, ValueError):
+            self.vat_rate.setValue(0.0)
         self.vat_number.setText(str(self.profile.get("vat_number") or ""))
         self.vat_mention.setText(str(self.profile.get("vat_mention") or ""))
+        self._update_vat_ui(apply_defaults=False)
         self.specialties.setPlainText(str(self.profile.get("specialties") or ""))
         self.diplomas.setPlainText(str(self.profile.get("diplomas") or ""))
         self.certifications.setPlainText(
@@ -271,6 +329,37 @@ class CloudCommercialProfileDialog(QDialog):
             )
             return
 
+        vat_regime = str(self.vat_regime.currentData() or "unspecified")
+        vat_rate = float(self.vat_rate.value())
+        vat_number = self.vat_number.text().strip()
+        vat_mention = self.vat_mention.text().strip()
+
+        if vat_regime == "vat_liable":
+            if vat_rate <= 0:
+                QMessageBox.warning(
+                    self,
+                    "TVA incomplète",
+                    "Indiquez un taux de TVA supérieur à 0 %.",
+                )
+                return
+            if not vat_number:
+                QMessageBox.warning(
+                    self,
+                    "TVA incomplète",
+                    "Le numéro de TVA est obligatoire pour un commercial redevable de TVA.",
+                )
+                return
+        elif vat_regime == "exempt" and not vat_mention:
+            QMessageBox.warning(
+                self,
+                "TVA incomplète",
+                "Indiquez la mention légale justifiant l'exonération de TVA.",
+            )
+            return
+        elif vat_regime == "franchise_base" and not vat_mention:
+            vat_mention = self.FRANCHISE_BASE_VAT_MENTION
+            self.vat_mention.setText(vat_mention)
+
         payload = {
             "first_name": first_name,
             "last_name": last_name,
@@ -288,8 +377,10 @@ class CloudCommercialProfileDialog(QDialog):
             "billing_postal_code": self.billing_postal_code.text().strip(),
             "billing_city": self.billing_city.text().strip(),
             "billing_country": self.billing_country.text().strip() or "France",
-            "vat_number": self.vat_number.text().strip(),
-            "vat_mention": self.vat_mention.text().strip(),
+            "vat_regime": vat_regime,
+            "vat_rate": f"{vat_rate:.2f}",
+            "vat_number": vat_number,
+            "vat_mention": vat_mention,
             "specialties": self.specialties.toPlainText().strip(),
             "diplomas": self.diplomas.toPlainText().strip(),
             "certifications": self.certifications.toPlainText().strip(),
