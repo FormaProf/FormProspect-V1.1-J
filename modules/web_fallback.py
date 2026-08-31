@@ -28,11 +28,14 @@ class WebFallbackFinder:
     MAX_FETCHES = 4
 
     DIRECTORY_DOMAINS = {
-        "pagesjaunes.fr",
+    # Moteurs de recherche
         "google.com",
         "google.fr",
         "bing.com",
         "duckduckgo.com",
+
+    # Annuaires / agrégateurs / bases entreprises
+        "pagesjaunes.fr",
         "pappers.fr",
         "societe.com",
         "entreprises.lefigaro.fr",
@@ -45,7 +48,12 @@ class WebFallbackFinder:
         "verif.com",
         "manageo.fr",
         "infogreffe.fr",
+        "le-site-de.com",
+        "hoodspot.fr",
+        "kompass.com",
+        "solocal.com",
     }
+
     SOCIAL_DOMAINS = {
         "facebook.com", "instagram.com", "linkedin.com", "youtube.com",
         "twitter.com", "x.com", "tiktok.com",

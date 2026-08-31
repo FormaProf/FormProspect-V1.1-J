@@ -92,27 +92,82 @@ class PagesJaunesFinder:
 
     @staticmethod
     def _external_site(links):
-        excluded = (
+        """Retourne uniquement un lien explicitement presente comme site officiel."""
+
+        excluded_domains = {
             "pagesjaunes.fr",
             "solocal.com",
+            "pappers.fr",
+            "societe.com",
+            "verif.com",
+            "manageo.fr",
+            "infogreffe.fr",
+            "allbiz.fr",
+            "cylex-locale.fr",
+            "118000.fr",
+            "118712.fr",
+            "le-site-de.com",
+            "hoodspot.fr",
+            "kompass.com",
+            "entreprises.lefigaro.fr",
+            "annuaire-entreprises.data.gouv.fr",
+            "annuaire-entreprises-rge.fr",
             "facebook.com",
             "instagram.com",
             "linkedin.com",
             "youtube.com",
             "twitter.com",
             "x.com",
+            "tiktok.com",
+        }
+
+        website_hints = (
+            "site internet",
+            "site web",
+            "website",
+            "voir le site",
+            "visiter le site",
+            "acceder au site",
+            "consulter le site",
+            "site officiel",
         )
-        for href in links:
+
+        for item in links or []:
+            if isinstance(item, dict):
+                href = str(item.get("href") or "").strip()
+                label = " ".join(
+                    str(item.get(key) or "").strip()
+                    for key in ("text", "title", "aria_label")
+                ).lower()
+            else:
+                href = str(item or "").strip()
+                label = ""
+
+            if not href.startswith(("http://", "https://")):
+                continue
+
             try:
-                host = urlparse(href).netloc.lower()
+                host = (urlparse(href).hostname or "").lower().strip(".")
             except Exception:
                 continue
-            if (
-                href.startswith("http")
-                and host
-                and not any(item in host for item in excluded)
+
+            if host.startswith("www."):
+                host = host[4:]
+
+            if not host:
+                continue
+
+            if any(
+                host == domain or host.endswith("." + domain)
+                for domain in excluded_domains
             ):
-                return href
+                continue
+
+            if not any(hint in label for hint in website_hints):
+                continue
+
+            return href
+
         return ""
 
     @staticmethod
@@ -227,8 +282,15 @@ class PagesJaunesFinder:
         )
 
         try:
-            links = await self.page.locator("a").evaluate_all(
-                "(els) => els.map(e => e.href).filter(Boolean)"
+            links = await self.page.locator("a[href]").evaluate_all(
+                """
+                (els) => els.map(e => ({
+                    href: e.href || "",
+                    text: (e.innerText || "").trim(),
+                    title: (e.getAttribute("title") || "").trim(),
+                    aria_label: (e.getAttribute("aria-label") || "").trim()
+                })).filter(x => x.href)
+                """
             )
         except Exception:
             links = []
