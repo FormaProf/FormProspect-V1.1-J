@@ -322,11 +322,15 @@ class ProspectService:
             str(pipeline).strip(),
         )
 
+    def recuperer_mobile(self, database_path, prospect_id):
+        return self._provider(database_path).get_mobile(prospect_id)
+
     def mettre_a_jour_contact(
         self,
         database_path,
         prospect_id,
         telephone,
+        mobile,
         site_web,
         email,
         facebook,
@@ -344,6 +348,7 @@ class ProspectService:
         ).update_contact_infos(
             prospect_id,
             telephone,
+            mobile,
             site_web,
             email,
             facebook,

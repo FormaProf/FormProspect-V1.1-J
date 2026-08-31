@@ -15,20 +15,11 @@ class ActivityService:
     """
     Service métier chargé de l'historique des activités d'un prospect.
 
-    Le service peut fonctionner de deux façons :
+    La source des données dépend du projet actif et est déterminée par
+    DataSourceResolver.
 
-    1. Mode explicite :
-       le contexte appelant connaît déjà la source des données et transmet
-       ``is_cloud_mode``. C'est notamment le cas de ProspectDialog lorsqu'un
-       prospect Cloud est ouvert depuis la vue globale Administrateur sans
-       projet actif.
-
-    2. Mode historique :
-       si aucun mode explicite n'est fourni, DataSourceResolver détermine
-       la source à partir du projet actuellement ouvert.
-
-    CloudRuntime sert uniquement à fournir le client API lorsqu'une source
-    Cloud a été explicitement déterminée.
+    CloudRuntime ne sert qu'à fournir le client API lorsque le projet
+    actif est réellement déployé dans le Cloud.
     """
 
     def __init__(
@@ -40,31 +31,25 @@ class ActivityService:
     ) -> None:
         self.resolver = resolver or DataSourceResolver()
         self.cloud_api_client = cloud_api_client
-        self.is_cloud_mode = is_cloud_mode
+        # Le CRM Cloud global n'implique pas qu'un projet Cloud précis soit
+        # ouvert. Le mode peut donc être injecté explicitement par l'écran.
+        self._is_cloud_mode_override = (
+            None if is_cloud_mode is None else bool(is_cloud_mode)
+        )
 
     def _is_cloud_project(self) -> bool:
         """
-        Indique si les activités doivent utiliser la source Cloud.
-
-        Lorsqu'un mode explicite a été transmis par l'appelant, celui-ci est
-        prioritaire. Cela permet notamment d'ouvrir un prospect Cloud depuis
-        la vue globale Administrateur même lorsqu'aucun projet n'est ouvert.
-
-        En l'absence de mode explicite, le fonctionnement historique fondé
-        sur DataSourceResolver est conservé.
+        Indique si le projet actif utilise la source Cloud.
         """
 
-        if self.is_cloud_mode is not None:
-            return self.is_cloud_mode
+        if self._is_cloud_mode_override is not None:
+            return self._is_cloud_mode_override
 
         return self.resolver.resolve().is_cloud
 
     def _cloud_api(self):
         """
-        Retourne le client API utilisable pour une source Cloud.
-
-        Un client peut être injecté pendant les tests. Dans l'application,
-        CloudRuntime fournit le client correspondant à la session active.
+        Retourne le client API associé à la session Cloud active.
         """
 
         return self.cloud_api_client or CloudRuntime.api()
@@ -80,7 +65,7 @@ class ActivityService:
 
     def get_activities(self, database_path, prospect_id):
         """
-        Retourne l'historique des activités depuis la source appropriée.
+        Retourne l'historique des activités depuis la source du projet actif.
         """
 
         if self._is_cloud_project():
@@ -108,7 +93,7 @@ class ActivityService:
         description,
     ):
         """
-        Ajoute une activité dans la source appropriée.
+        Ajoute une activité dans la source du projet actif.
         """
 
         type_action_normalise = str(type_action or "Activité").strip()

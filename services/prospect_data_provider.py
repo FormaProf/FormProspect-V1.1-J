@@ -86,6 +86,7 @@ class ProspectDataProvider(ABC):
         self,
         prospect_id,
         telephone,
+        mobile,
         site_web,
         email,
         facebook,
@@ -174,10 +175,14 @@ class LocalProspectDataProvider(ProspectDataProvider):
     def update_pipeline(self, prospect_id, pipeline):
         return self.repository.update_pipeline(prospect_id, pipeline)
 
+    def get_mobile(self, prospect_id):
+        return self.repository.get_mobile(prospect_id)
+
     def update_contact_infos(
         self,
         prospect_id,
         telephone,
+        mobile,
         site_web,
         email,
         facebook,
@@ -193,6 +198,7 @@ class LocalProspectDataProvider(ProspectDataProvider):
         return self.repository.update_contact_infos(
             prospect_id,
             telephone,
+            mobile,
             site_web,
             email,
             facebook,
@@ -705,10 +711,15 @@ class CloudProspectDataProvider(ProspectDataProvider):
         )
         return True
 
+    def get_mobile(self, prospect_id):
+        current = self.api_client.get_prospect(str(prospect_id))
+        return str(current.get("mobile") or "")
+
     def update_contact_infos(
         self,
         prospect_id,
         telephone,
+        mobile,
         site_web,
         email,
         facebook,
@@ -724,6 +735,7 @@ class CloudProspectDataProvider(ProspectDataProvider):
         current = self.api_client.get_prospect(str(prospect_id))
         payload = {
             "phone": telephone,
+            "mobile": mobile,
             "website": site_web,
             "email": email,
             "facebook": facebook,

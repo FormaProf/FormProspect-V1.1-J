@@ -23,7 +23,8 @@ class ProspectRepository(BaseRepository):
             commercial_assigne,
             score_prospect,
             score_grade,
-            score_label
+            score_label,
+            mobile
         FROM prospects
     """
 
@@ -61,11 +62,47 @@ class ProspectRepository(BaseRepository):
         FROM prospects
     """
 
+    DEPLOYMENT_BATCH_SELECT = """
+        SELECT
+            id,
+            entreprise,
+            siret,
+            siren,
+            adresse,
+            code_postal,
+            ville,
+            code_naf,
+            telephone,
+            site_web,
+            email,
+            facebook,
+            linkedin,
+            instagram,
+            twitter,
+            youtube,
+            social_other_urls,
+            statut_enrichissement,
+            date_collecte,
+            pipeline,
+            priorite,
+            prochaine_action,
+            date_prochaine_action,
+            commercial_assigne,
+            score_prospect,
+            score_grade,
+            score_label,
+            score_details,
+            date_score,
+            mobile
+        FROM prospects
+    """
+
     SEARCH_FIELDS = [
         "entreprise",
         "ville",
         "code_postal",
         "telephone",
+        "mobile",
         "site_web",
         "email",
         "statut_enrichissement",
@@ -90,7 +127,7 @@ class ProspectRepository(BaseRepository):
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(prospects)")
         columns = {row[1] for row in cur.fetchall()}
-        for column in ("twitter", "social_other_urls"):
+        for column in ("twitter", "social_other_urls", "mobile"):
             if column not in columns:
                 cur.execute(
                     f"ALTER TABLE prospects ADD COLUMN {column} TEXT DEFAULT ''"
@@ -109,10 +146,12 @@ class ProspectRepository(BaseRepository):
     def count_with_phone(self):
         conn = self.get_connection()
         try:
+            self._ensure_social_deployment_columns(conn)
             cur = conn.cursor()
             cur.execute(
                 "SELECT COUNT(*) FROM prospects "
-                "WHERE telephone IS NOT NULL AND telephone != ''"
+                "WHERE (telephone IS NOT NULL AND TRIM(telephone) != '') "
+                "   OR (mobile IS NOT NULL AND TRIM(mobile) != '')"
             )
             return cur.fetchone()[0]
         finally:
@@ -191,6 +230,7 @@ class ProspectRepository(BaseRepository):
     ):
         conn = self.get_connection()
         try:
+            self._ensure_social_deployment_columns(conn)
             cur = conn.cursor()
             where_clause, params = self._build_where_clause(
                 recherche=recherche,
@@ -225,6 +265,7 @@ class ProspectRepository(BaseRepository):
     ):
         conn = self.get_connection()
         try:
+            self._ensure_social_deployment_columns(conn)
             cur = conn.cursor()
             where_clause, params = self._build_where_clause(
                 recherche=recherche,
@@ -278,7 +319,7 @@ class ProspectRepository(BaseRepository):
             while offset < total_items:
                 cur.execute(
                     f"""
-                    {self.DEPLOYMENT_SELECT}
+                    {self.DEPLOYMENT_BATCH_SELECT}
                     ORDER BY id ASC
                     LIMIT ? OFFSET ?
                     """,
@@ -379,10 +420,25 @@ class ProspectRepository(BaseRepository):
         finally:
             conn.close()
 
+    def get_mobile(self, prospect_id):
+        conn = self.get_connection()
+        try:
+            self._ensure_social_deployment_columns(conn)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COALESCE(mobile, '') FROM prospects WHERE id = ?",
+                (prospect_id,),
+            )
+            row = cur.fetchone()
+            return str(row[0] or "") if row else ""
+        finally:
+            conn.close()
+
     def update_contact_infos(
         self,
         prospect_id,
         telephone,
+        mobile,
         site_web,
         email,
         facebook,
@@ -397,12 +453,14 @@ class ProspectRepository(BaseRepository):
     ):
         conn = self.get_connection()
         try:
+            self._ensure_social_deployment_columns(conn)
             cur = conn.cursor()
             cur.execute(
                 """
                 UPDATE prospects
                 SET
                     telephone = ?,
+                    mobile = ?,
                     site_web = ?,
                     email = ?,
                     facebook = ?,
@@ -418,6 +476,7 @@ class ProspectRepository(BaseRepository):
                 """,
                 (
                     telephone,
+                    mobile,
                     site_web,
                     email,
                     facebook,

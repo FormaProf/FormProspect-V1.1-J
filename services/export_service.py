@@ -10,6 +10,15 @@ class ExportService:
         init_database(database_path)
         conn = connect_database(database_path)
 
+        # Compatibilité avec les anciens projets locaux : la colonne Mobile
+        # est ajoutée sans perte de données si elle n'existe pas encore.
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(prospects)").fetchall()
+        }
+        if "mobile" not in columns:
+            conn.execute("ALTER TABLE prospects ADD COLUMN mobile TEXT")
+            conn.commit()
+
         df = pd.read_sql_query("""
             SELECT
                 entreprise,
@@ -20,6 +29,7 @@ class ExportService:
                 ville,
                 code_naf,
                 telephone,
+                mobile,
                 site_web,
                 email,
                 facebook,

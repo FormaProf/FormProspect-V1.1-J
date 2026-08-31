@@ -12,20 +12,11 @@ class NoteService:
     """
     Service métier chargé des notes liées aux prospects.
 
-    Le service peut fonctionner de deux façons :
+    La source des données est déterminée par DataSourceResolver à partir
+    du projet actuellement ouvert.
 
-    1. Mode explicite :
-       le contexte appelant connaît déjà la source des données et transmet
-       ``is_cloud_mode``. C'est notamment le cas de ProspectDialog lorsqu'un
-       prospect Cloud est ouvert depuis la vue globale Administrateur sans
-       projet actif.
-
-    2. Mode historique :
-       si aucun mode explicite n'est fourni, DataSourceResolver détermine
-       la source à partir du projet actuellement ouvert.
-
-    CloudRuntime sert uniquement à fournir le client API lorsqu'une source
-    Cloud a été explicitement déterminée.
+    CloudRuntime sert uniquement à fournir le client API lorsqu'un projet
+    est réellement configuré en mode Cloud.
     """
 
     def __init__(
@@ -37,28 +28,29 @@ class NoteService:
     ) -> None:
         self.resolver = resolver or DataSourceResolver()
         self.cloud_api_client = cloud_api_client
-        self.is_cloud_mode = is_cloud_mode
+        # Un écran CRM Cloud global peut être utilisé sans projet/workspace
+        # actuellement ouvert. Dans ce cas le contexte de l'écran est plus
+        # fiable que DataSourceResolver, qui exige un projet actif.
+        self._is_cloud_mode_override = (
+            None if is_cloud_mode is None else bool(is_cloud_mode)
+        )
 
     def _is_cloud_project(self) -> bool:
         """
-        Indique si les notes doivent utiliser la source Cloud.
+        Indique si le projet actif utilise la source de données Cloud.
 
-        Lorsqu'un mode explicite a été transmis par l'appelant, celui-ci est
-        prioritaire. Cela permet notamment d'ouvrir un prospect Cloud depuis
-        la vue globale Administrateur même lorsqu'aucun projet n'est ouvert.
-
-        En l'absence de mode explicite, le fonctionnement historique fondé
-        sur DataSourceResolver est conservé.
+        La présence d'une session Cloud ne décide jamais de la source
+        de données.
         """
 
-        if self.is_cloud_mode is not None:
-            return self.is_cloud_mode
+        if self._is_cloud_mode_override is not None:
+            return self._is_cloud_mode_override
 
         return self.resolver.resolve().is_cloud
 
     def _cloud_api(self):
         """
-        Retourne le client API utilisable pour une source Cloud.
+        Retourne le client API utilisable pour un projet Cloud.
 
         Un client peut être injecté pendant les tests. Dans l'application,
         CloudRuntime fournit le client correspondant à la session active.
@@ -77,7 +69,7 @@ class NoteService:
 
     def get_notes(self, database_path, prospect_id):
         """
-        Retourne les notes du prospect depuis la source appropriée.
+        Retourne les notes du prospect depuis la source du projet actif.
         """
 
         if self._is_cloud_project():
@@ -104,7 +96,7 @@ class NoteService:
 
     def add_note(self, database_path, prospect_id, contenu):
         """
-        Ajoute une note dans la source appropriée.
+        Ajoute une note dans la source du projet actif.
         """
 
         contenu_normalise = str(contenu or "").strip()

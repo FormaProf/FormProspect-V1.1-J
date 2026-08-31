@@ -509,7 +509,6 @@ class ProspectDialog(QDialog):
 
         self.prospect_service = ProspectService()
         self.datasource = DataSourceResolver()
-
         # Le contexte de la page CRM est la source fiable. Une session Cloud
         # peut coexister avec un projet local et le dialogue ne doit donc pas
         # déduire seul son mode depuis la session.
@@ -521,18 +520,11 @@ class ProspectDialog(QDialog):
         else:
             self._is_cloud_mode = bool(is_cloud_mode)
 
-        # Le dialogue connaît maintenant explicitement sa source de données.
-        # On transmet cette information au service de notes afin qu'une fiche
-        # Prospect Cloud puisse être ouverte depuis la vue globale Admin même
-        # lorsqu'aucun projet/workspace n'est actuellement ouvert.
-        self.note_service = NoteService(
-            resolver=self.datasource,
-            is_cloud_mode=self._is_cloud_mode,
-        )
-        self.activity_service = ActivityService(
-            resolver=self.datasource,
-            is_cloud_mode=self._is_cloud_mode,
-        )
+        # Les notes et l'historique doivent suivre le contexte explicite de
+        # la fiche. Cela permet d'ouvrir une fiche depuis le CRM Cloud global
+        # même lorsqu'aucun projet Form@Prospect n'est ouvert.
+        self.note_service = NoteService(is_cloud_mode=self._is_cloud_mode)
+        self.activity_service = ActivityService(is_cloud_mode=self._is_cloud_mode)
 
         self.ancien_pipeline = PIPELINE_DEFAULT
         self.ancienne_priorite = PRIORITE_DEFAULT
@@ -656,6 +648,7 @@ class ProspectDialog(QDialog):
         # Widgets / champs
         # -------------------------
         self.entreprise_input = QLineEdit()
+        self.siret_input = QLineEdit()
         self.ville_input = QLineEdit()
         self.cp_input = QLineEdit()
         self.telephone_input = QLineEdit()
@@ -701,6 +694,7 @@ class ProspectDialog(QDialog):
         self.score_details_input.setFixedHeight(92)
 
         self.entreprise_input.setReadOnly(True)
+        self.siret_input.setReadOnly(True)
         self.ville_input.setReadOnly(True)
         self.cp_input.setReadOnly(True)
 
@@ -718,7 +712,8 @@ class ProspectDialog(QDialog):
         identity_grid.setHorizontalSpacing(14)
         identity_grid.setVerticalSpacing(12)
 
-        identity_grid.addWidget(self._field_block("Entreprise", self.entreprise_input), 0, 0, 1, 2)
+        identity_grid.addWidget(self._field_block("Entreprise", self.entreprise_input), 0, 0)
+        identity_grid.addWidget(self._field_block("SIRET", self.siret_input), 0, 1)
         identity_grid.addWidget(self._field_block("Ville", self.ville_input), 1, 0)
         identity_grid.addWidget(self._field_block("Code postal", self.cp_input), 1, 1)
         identity_grid.addWidget(self._field_block("Téléphone", self.telephone_input), 2, 0)
@@ -931,6 +926,7 @@ class ProspectDialog(QDialog):
         ]
         readonly = [
             self.entreprise_input,
+            self.siret_input,
             self.ville_input,
             self.cp_input,
         ]
@@ -1220,6 +1216,7 @@ class ProspectDialog(QDialog):
         self.ancien_commercial = commercial_final
 
         self.entreprise_input.setText(str(entreprise or ""))
+        self.siret_input.setText(str(siret or ""))
         self.titre.setText(str(entreprise or "Fiche prospect"))
         self.header_subtitle.setText(
             f"{str(ville or 'Ville non renseignée')}  •  "
@@ -1232,13 +1229,14 @@ class ProspectDialog(QDialog):
         self.telephone_input.setText(str(telephone or ""))
 
         mobile_value = ""
-        if self._is_cloud_mode and CloudRuntime.is_active():
-            try:
-                cloud_record = CloudRuntime.api().get_prospect(str(self.prospect_id))
-                mobile_value = str(cloud_record.get("mobile") or "")
-            except Exception:
-                mobile_value = ""
-        self.mobile_input.setText(mobile_value)
+        try:
+            mobile_value = self.prospect_service.recuperer_mobile(
+                self.database_path,
+                self.prospect_id,
+            )
+        except Exception:
+            mobile_value = ""
+        self.mobile_input.setText(str(mobile_value or ""))
 
         self.site_input.setText(str(site_web or ""))
         self.email_input.setText(str(email or ""))
@@ -1393,6 +1391,7 @@ class ProspectDialog(QDialog):
                 self.database_path,
                 self.prospect_id,
                 self.telephone_input.text().strip(),
+                self.mobile_input.text().strip(),
                 self.site_input.text().strip(),
                 self.email_input.text().strip(),
                 self.facebook_input.text().strip(),
@@ -1410,7 +1409,6 @@ class ProspectDialog(QDialog):
                 CloudRuntime.api().update_prospect(
                     str(self.prospect_id),
                     {
-                        "mobile": self.mobile_input.text().strip(),
                         "twitter": self.twitter_input.text().strip(),
                         "social_other_urls": (
                             self.social_other_urls_input.toPlainText().strip()
