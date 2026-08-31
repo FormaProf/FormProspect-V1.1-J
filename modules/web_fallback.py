@@ -133,48 +133,84 @@ class WebFallbackFinder:
         if not names:
             return []
 
-        primary_locations = locations[:2]
         queries = []
+        primary_name = names[0]
+        current_location = locations[0] if locations else {}
 
-        # Priorité aux alias/enseignes puis à la raison sociale, avec ville ou CP.
-        for name in names[:2]:
-            location = primary_locations[0] if primary_locations else {}
-            where = " ".join(
+        # 1. Recherche principale : nom + localisation actuelle.
+        current_where = " ".join(
+            value
+            for value in (
+                str(current_location.get("code_postal") or "").strip(),
+                str(current_location.get("ville") or "").strip(),
+            )
+            if value
+        )
+        queries.append(
+            " ".join(
                 value
-                for value in (
-                    str(location.get("code_postal") or "").strip(),
-                    str(location.get("ville") or "").strip(),
-                )
+                for value in (primary_name, current_where)
                 if value
             )
-            queries.append(" ".join(x for x in (name, where) if x))
-            if len(queries) >= WebFallbackFinder.MAX_QUERIES:
-                break
+        )
 
-        # Une recherche exacte par SIRET est très efficace sur les annuaires web
-        # génériques. Contrairement à PagesJaunes, le SIRET est pertinent ici.
+        # 2. Recherche exacte par SIRET.
+        # C'est le signal le plus fiable pour retrouver des annuaires,
+        # d'anciennes fiches et des coordonnées rattachées à la même entreprise.
         siret = re.sub(r"\D", "", str(identity.get("siret") or ""))
         if len(siret) == 14:
             queries.append(siret)
 
-        # Si le siège/une autre implantation est connue, une variante du nom
-        # principal avec cette ville peut retrouver une fiche qui n'existe pas
-        # à l'adresse du SIRET courant.
-        if len(primary_locations) > 1:
-            alt = primary_locations[1]
-            where = " ".join(
+        # 3. Recherche sur une ancienne implantation distincte.
+        # Un ancien téléphone peut rester utile commercialement ; on ne doit
+        # donc pas sacrifier l'historique au profit d'un second alias.
+        current_cp = str(current_location.get("code_postal") or "").strip()
+        current_city = str(current_location.get("ville") or "").strip().lower()
+
+        historical_query_added = False
+        for location in locations[1:]:
+            cp = str(location.get("code_postal") or "").strip()
+            city = str(location.get("ville") or "").strip()
+
+            if not cp and not city:
+                continue
+
+            if cp == current_cp and city.lower() == current_city:
+                continue
+
+            historical_where = " ".join(
                 value
-                for value in (
-                    str(alt.get("code_postal") or "").strip(),
-                    str(alt.get("ville") or "").strip(),
-                )
+                for value in (cp, city)
                 if value
             )
-            if where:
-                queries.append(f"{names[0]} {where}")
+            if historical_where:
+                queries.append(f"{primary_name} {historical_where}")
+                historical_query_added = True
+                break
 
-        return list(dict.fromkeys(q.strip() for q in queries if q.strip()))[: WebFallbackFinder.MAX_QUERIES]
+        # S'il n'existe aucun historique distinct et qu'il reste de la place,
+        # on utilise le second alias/nom commercial comme recherche de secours.
+        if (
+            not historical_query_added
+            and len(queries) < WebFallbackFinder.MAX_QUERIES
+            and len(names) > 1
+        ):
+            alias_query = " ".join(
+                value
+                for value in (names[1], current_where)
+                if value
+            )
+            if alias_query:
+                queries.append(alias_query)
 
+        unique_queries = list(
+            dict.fromkeys(
+                query.strip()
+                for query in queries
+                if query.strip()
+            )
+        )
+        return unique_queries[: WebFallbackFinder.MAX_QUERIES]
     def _search_urls(self, query: str) -> list[str]:
         try:
             response = requests.get(

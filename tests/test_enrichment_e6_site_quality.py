@@ -138,3 +138,26 @@ def test_web_fallback_keeps_real_company_domain_candidate():
         )
         is True
     )
+
+def test_web_query_plan_keeps_current_and_historical_location():
+    """Le SIRET, l'adresse actuelle et une ancienne implantation doivent survivre."""
+
+    identity = _decam_identity()
+
+    plan = WebFallbackFinder._query_plan(identity)
+
+    assert len(plan) <= WebFallbackFinder.MAX_QUERIES
+
+    assert "30109677200027" in plan
+
+    assert any(
+        "DECAM" in query
+        and ("75012" in query or "PARIS" in query)
+        for query in plan
+    )
+
+    assert any(
+        "DECAM" in query
+        and ("92300" in query or "LEVALLOIS-PERRET" in query)
+        for query in plan
+    )
