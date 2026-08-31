@@ -1,3 +1,10 @@
-Première version avec système de mise à jour automatique
-Vérification sécurisée SHA-256 avant installation
-Améliorations de l'interface Form@Prospect
+Amélioration du suivi des paiements, ventes et commissions
+Amélioration de la gestion des commissions et de la TVA des partenaires commerciaux
+Ajout du transfert de portefeuille entre commerciaux
+Ajout d'un espace dédié aux formateurs
+Amélioration de l'enrichissement et de la gestion des coordonnées prospects
+Amélioration de la gestion des activités et données Cloud
+Amélioration du workflow documentaire et du suivi des apprenants
+Amélioration de la gestion des formateurs
+Correction de l'affichage des heures des actions planifiées dans l'agenda
+Améliorations générales de fiabilité et de stabilité
