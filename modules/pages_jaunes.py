@@ -1,22 +1,27 @@
 from __future__ import annotations
 
-import asyncio
 import re
 from urllib.parse import urlencode, urljoin, urlparse
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
 from modules.browser_manager import BrowserManager
-from modules.company_matcher import score_candidate, confidence
+from modules.company_matcher import confidence, identity_locations, identity_names, score_candidate
+from modules.contact_quality import extract_phones_from_text, normalize_fr_phone
 
 
 class PagesJaunesFinder:
     SEARCH_URL = "https://www.pagesjaunes.fr/annuaire/chercherlespros"
+    RESULT_WAIT_MS = 3500
+    PROFILE_LIMIT = 3
 
     def __init__(self):
         self.playwright = None
         self.browser = None
         self.page = None
+        self._cookies_checked = False
+        self.last_errors: list[str] = []
 
     async def ouvrir(self):
         if self.browser is not None:
@@ -45,22 +50,12 @@ class PagesJaunesFinder:
                 await self.playwright.stop()
             finally:
                 self.playwright = None
+        self._cookies_checked = False
 
     @staticmethod
     def extraire_telephones(texte):
-        pattern = r"(?:0|\+33\s?)[1-9](?:[\s.\-]?\d{2}){4}"
-        out = []
-        for numero in re.findall(pattern, str(texte or "")):
-            compact = re.sub(r"\D", "", numero)
-            if numero.strip().startswith("+33"):
-                compact = "0" + compact[2:]
-            if len(compact) == 10 and compact.startswith("0"):
-                formatted = " ".join(
-                    compact[i:i + 2] for i in range(0, 10, 2)
-                )
-                if formatted not in out:
-                    out.append(formatted)
-        return out
+        extracted = extract_phones_from_text(str(texte or ""))
+        return extracted["phone"] + extracted["mobile"]
 
     @staticmethod
     def _phone_sort_key(numero):
@@ -70,17 +65,30 @@ class PagesJaunesFinder:
             compact,
         )
 
-    async def _accept_cookies(self):
-        for label in ("Tout accepter", "Accepter", "J'accepte"):
-            try:
-                await self.page.get_by_role(
-                    "button",
-                    name=label,
-                ).click(timeout=1500)
-                await asyncio.sleep(1)
-                return
-            except Exception:
-                pass
+    async def _accept_cookies_once(self):
+        """Accepte automatiquement la bannière PagesJaunes une fois.
+
+        La bannière n'est normalement présentée qu'au début de la session. On
+        attend brièvement son bouton, puis on ne refait plus ce contrôle.
+        """
+        if self._cookies_checked:
+            return True
+
+        button_pattern = re.compile(
+            r"^(tout accepter|accepter tout|accepter|j['’]accepte)$",
+            re.I,
+        )
+        try:
+            target = self.page.get_by_role("button", name=button_pattern).first
+            await target.wait_for(state="visible", timeout=1800)
+            await target.click(timeout=1800)
+        except Exception:
+            # Pas de bannière visible = consentement déjà enregistré ou CMP
+            # absente. PagesJaunes reste utilisable, on ne ralentit pas la suite.
+            pass
+
+        self._cookies_checked = True
+        return True
 
     @staticmethod
     def _external_site(links):
@@ -107,6 +115,24 @@ class PagesJaunesFinder:
                 return href
         return ""
 
+    @staticmethod
+    def _empty_result(errors=None):
+        return {
+            "source": "pages_jaunes",
+            "nom": "",
+            "adresse": "",
+            "code_postal": "",
+            "ville": "",
+            "telephones": [],
+            "faxes": [],
+            "site_web": "",
+            "texte": "",
+            "match_score": 0,
+            "match_reasons": [],
+            "confidence": "rejected",
+            "technical_errors": list(errors or []),
+        }
+
     async def _extract_profile(self):
         body = await self.page.inner_text("body")
         name = ""
@@ -124,7 +150,7 @@ class PagesJaunesFinder:
                     if name:
                         break
             except Exception:
-                pass
+                continue
 
         candidates = []
         for selector in (
@@ -139,13 +165,64 @@ class PagesJaunesFinder:
                     if text:
                         candidates.append(text)
             except Exception:
-                pass
+                continue
 
         if candidates:
             address = max(candidates, key=len)
 
+        # Lot 1.1 : on privilégie les éléments explicitement téléphoniques.
+        # Scanner tout le body récupérait aussi des fax et des numéros
+        # techniques présents ailleurs dans la fiche.
+        semantic_chunks = []
+        try:
+            loc = self.page.locator('a[href^="tel:"]')
+            for i in range(min(await loc.count(), 8)):
+                el = loc.nth(i)
+                href = await el.get_attribute("href")
+                label = await el.get_attribute("aria-label")
+                text = await el.inner_text()
+                semantic_chunks.append(" ".join(x for x in (label, text, href) if x))
+        except Exception:
+            pass
+
+        for selector in (
+            'button[aria-label*="Téléphone"]',
+            'a[aria-label*="Téléphone"]',
+            'button[aria-label*="telephone" i]',
+            'a[aria-label*="telephone" i]',
+            'button[aria-label*="Fax"]',
+            'a[aria-label*="Fax"]',
+        ):
+            try:
+                loc = self.page.locator(selector)
+                for i in range(min(await loc.count(), 8)):
+                    el = loc.nth(i)
+                    label = await el.get_attribute("aria-label")
+                    text = await el.inner_text()
+                    semantic_chunks.append(" ".join(x for x in (label, text) if x))
+            except Exception:
+                continue
+
+        classified = {"phone": [], "mobile": [], "fax": []}
+        seen = {"phone": set(), "mobile": set(), "fax": set()}
+        for chunk in semantic_chunks:
+            found = extract_phones_from_text(chunk)
+            for kind in classified:
+                for number in found[kind]:
+                    key = number.replace(" ", "")
+                    if key not in seen[kind]:
+                        seen[kind].add(key)
+                        classified[kind].append(number)
+
+        if not classified["phone"] and not classified["mobile"]:
+            fallback = extract_phones_from_text(
+                body,
+                require_contact_hint=True,
+            )
+            classified = fallback
+
         phones = sorted(
-            dict.fromkeys(self.extraire_telephones(body)),
+            dict.fromkeys(classified["phone"] + classified["mobile"]),
             key=self._phone_sort_key,
         )
 
@@ -165,106 +242,182 @@ class PagesJaunesFinder:
             "code_postal": cp_match.group(1) if cp_match else "",
             "ville": "",
             "telephones": phones,
+            "faxes": classified["fax"],
             "site_web": self._external_site(links),
             "texte": body[:16000],
         }
 
-    async def rechercher(self, identity):
-        await self.ouvrir()
-
-        entreprise = str(identity.get("entreprise") or "").strip()
-        adresse = str(identity.get("adresse") or "").strip()
-        code_postal = str(identity.get("code_postal") or "").strip()
-        ville = str(identity.get("ville") or "").strip()
-
-        location = " ".join(
-            value
-            for value in (
-                adresse,
-                code_postal,
-                ville,
+    async def _wait_for_search_results(self):
+        locator = self.page.locator('a[href*="/pros/"]')
+        try:
+            await locator.first.wait_for(
+                state="attached",
+                timeout=self.RESULT_WAIT_MS,
             )
-            if value
-        ) or ville
+        except PlaywrightTimeoutError:
+            # Une recherche sans résultat n'est pas une erreur technique.
+            pass
 
-        url = (
-            self.SEARCH_URL
-            + "?"
-            + urlencode(
-                {
-                    "quoiqui": entreprise,
-                    "ou": location,
-                }
-            )
-        )
-
-        best = None
-        best_score = -999
+    async def _search_once(self, identity, quoiqui: str, location: str = ""):
+        params = {"quoiqui": quoiqui}
+        if location:
+            params["ou"] = location
+        url = self.SEARCH_URL + "?" + urlencode(params)
 
         try:
             await self.page.goto(
                 url,
-                timeout=60000,
+                timeout=30000,
                 wait_until="domcontentloaded",
             )
-            await asyncio.sleep(4)
-            await self._accept_cookies()
-            await asyncio.sleep(2)
+            await self._accept_cookies_once()
+            await self._wait_for_search_results()
+        except Exception as exc:
+            self.last_errors.append(
+                f"recherche '{quoiqui}': {type(exc).__name__}: {exc}"
+            )
+            return self._empty_result(self.last_errors)
 
+        hrefs = []
+        if "/pros/" in (self.page.url or ""):
+            hrefs.append(self.page.url)
+
+        try:
             links = self.page.locator('a[href*="/pros/"]')
-            hrefs = []
-
-            for i in range(min(await links.count(), 6)):
+            for i in range(min(await links.count(), self.PROFILE_LIMIT)):
                 href = await links.nth(i).get_attribute("href")
                 if href:
-                    href = urljoin(
-                        "https://www.pagesjaunes.fr",
-                        href,
-                    )
+                    href = urljoin("https://www.pagesjaunes.fr", href)
                     if href not in hrefs:
                         hrefs.append(href)
+        except Exception as exc:
+            self.last_errors.append(
+                f"lecture résultats '{quoiqui}': {type(exc).__name__}: {exc}"
+            )
 
-            for href in hrefs:
-                try:
+        best = None
+        best_score = -999
+        for href in hrefs[: self.PROFILE_LIMIT]:
+            try:
+                if href != self.page.url:
                     await self.page.goto(
                         href,
-                        timeout=60000,
+                        timeout=30000,
                         wait_until="domcontentloaded",
                     )
-                    await asyncio.sleep(3)
+                candidate = await self._extract_profile()
+                score, reasons = score_candidate(identity, candidate)
+                candidate.update(
+                    match_score=score,
+                    match_reasons=reasons,
+                    confidence=confidence(score),
+                    technical_errors=list(self.last_errors),
+                )
+                if score > best_score:
+                    best = candidate
+                    best_score = score
+                if candidate["confidence"] == "validated":
+                    return candidate
+            except Exception as exc:
+                self.last_errors.append(
+                    f"fiche PagesJaunes: {type(exc).__name__}: {exc}"
+                )
 
-                    candidate = await self._extract_profile()
-                    score, reasons = score_candidate(
-                        identity,
-                        candidate,
-                    )
-                    candidate.update(
-                        match_score=score,
-                        match_reasons=reasons,
-                        confidence=confidence(score),
-                    )
+        if best:
+            best["technical_errors"] = list(self.last_errors)
+            return best
+        return self._empty_result(self.last_errors)
 
-                    if score > best_score:
-                        best = candidate
-                        best_score = score
+    @staticmethod
+    def _name_search_plan(identity):
+        """Construit les recherches PagesJaunes à partir des noms publics.
 
-                    if candidate["confidence"] == "validated":
-                        return candidate
-                except Exception:
-                    continue
-        except Exception:
-            pass
+        Lot 2.2 : lorsqu'un SIREN possède plusieurs établissements dans le
+        projet, les noms et localisations mutualisés peuvent être essayés. Le
+        SIRET/SIREN ne sont toujours jamais envoyés à PagesJaunes.
+        """
+        entreprise = str(identity.get("entreprise") or "").strip()
+        names = identity_names(identity)
+        if not names:
+            return []
 
-        return best or {
-            "source": "pages_jaunes",
-            "nom": "",
-            "adresse": "",
-            "code_postal": "",
-            "ville": "",
-            "telephones": [],
-            "site_web": "",
-            "texte": "",
-            "match_score": 0,
-            "match_reasons": [],
-            "confidence": "rejected",
-        }
+        primary = entreprise
+        aliases = [name for name in names if name != primary][:4]
+        ordered_names = aliases + ([primary] if primary else [])
+
+        locations = identity_locations(identity)
+        if not locations:
+            locations = [{"adresse": "", "code_postal": "", "ville": ""}]
+
+        # La localisation du SIRET courant reste prioritaire. On ajoute au plus
+        # deux autres implantations du même SIREN pour ne pas faire exploser le
+        # temps de traitement.
+        locations = locations[:3]
+        compact_locations = []
+        full_locations = []
+        for item in locations:
+            cp = str(item.get("code_postal") or "").strip()
+            city = str(item.get("ville") or "").strip()
+            address = str(item.get("adresse") or "").strip()
+            compact = " ".join(value for value in (cp, city) if value)
+            full = " ".join(value for value in (address, cp, city) if value)
+            if compact not in compact_locations:
+                compact_locations.append(compact)
+            if full and full not in full_locations:
+                full_locations.append(full)
+
+        plan = []
+        # Les alias sont les plus utiles lorsqu'une fiche publique porte le nom
+        # commercial du siège plutôt que la raison sociale de l'établissement.
+        for name in ordered_names:
+            for location in compact_locations[:2]:
+                plan.append((name, location))
+
+        # Dernier recours : raison sociale avec les adresses complètes connues.
+        # On garde une limite stricte afin de préserver la vitesse du Lot 2.
+        if primary:
+            for full_location in full_locations[:2]:
+                pair = (primary, full_location)
+                if pair not in plan:
+                    plan.append(pair)
+
+        return list(dict.fromkeys(plan))[:12]
+
+    async def rechercher_nom(self, identity):
+        """Recherche PagesJaunes par nom/raison sociale + localisation.
+
+        Important : aucun SIRET/SIREN n'est envoyé dans la barre de recherche
+        PagesJaunes. Ces identifiants servent seulement à valider/scorer les
+        fiches obtenues lorsqu'ils sont présents dans leur contenu.
+        """
+        await self.ouvrir()
+        self.last_errors = []
+
+        plan = self._name_search_plan(identity)
+        if not plan:
+            return self._empty_result()
+
+        best = None
+        best_score = -999
+        for quoiqui, location in plan:
+            result = await self._search_once(identity, quoiqui, location)
+            score = int(result.get("match_score") or 0)
+            if score > best_score:
+                best = result
+                best_score = score
+            if result.get("confidence") == "validated":
+                return result
+
+        return best or self._empty_result(self.last_errors)
+
+    async def rechercher_identifiant(self, identity):
+        """Compatibilité avec l'ancienne API, sans recherche par identifiant.
+
+        Conservée pour éviter de casser un éventuel appel externe, mais elle
+        délègue désormais à la recherche par nom/localisation.
+        """
+        return await self.rechercher_nom(identity)
+
+    async def rechercher(self, identity):
+        """Compatibilité avec l'ancienne API."""
+        return await self.rechercher_nom(identity)

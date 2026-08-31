@@ -127,13 +127,17 @@ class TreatmentPage(QWidget):
         import_actions.setSpacing(10)
         self.bouton_excel = QPushButton("📥 Choisir un fichier Excel")
         self.bouton_importer = QPushButton("✅ Importer dans le projet actif")
-        for button in (self.bouton_excel, self.bouton_importer):
+        self.bouton_aliases = QPushButton("🏷️ Ajouter enseignes / sigles")
+        for button in (self.bouton_excel, self.bouton_importer, self.bouton_aliases):
             button.setFixedHeight(44)
             button.setStyleSheet(primary_button_style())
+        self.bouton_aliases.setEnabled(False)
         self.bouton_excel.clicked.connect(self.choisir_excel)
         self.bouton_importer.clicked.connect(self.importer_dans_sqlite)
+        self.bouton_aliases.clicked.connect(self.mettre_a_jour_noms_recherche)
         import_actions.addWidget(self.bouton_excel)
         import_actions.addWidget(self.bouton_importer)
+        import_actions.addWidget(self.bouton_aliases)
         import_actions.addStretch()
         self.project_card.content_layout.addLayout(import_actions)
         root.addWidget(self.project_card)
@@ -157,22 +161,33 @@ class TreatmentPage(QWidget):
         action_layout.setSpacing(10)
         self.bouton_test = QPushButton(f"🧪 Tester sur {self.TEST_LIMIT} prospects")
         self.bouton_enrichir = QPushButton("🚀 Enrichir tous les prospects restants")
+        self.bouton_reessayer = QPushButton("↻ Retenter les sans résultat")
         self.bouton_pause = QPushButton("⏸ Pause")
         self.bouton_arreter = QPushButton("⏹ Arrêter")
-        for button in (self.bouton_test, self.bouton_enrichir, self.bouton_pause, self.bouton_arreter):
+        for button in (
+            self.bouton_test,
+            self.bouton_enrichir,
+            self.bouton_reessayer,
+            self.bouton_pause,
+            self.bouton_arreter,
+        ):
             button.setFixedHeight(46)
         self.bouton_test.setStyleSheet(primary_button_style())
         self.bouton_enrichir.setStyleSheet(primary_button_style())
+        self.bouton_reessayer.setStyleSheet(warning_button_style())
         self.bouton_pause.setStyleSheet(warning_button_style())
         self.bouton_arreter.setStyleSheet(danger_button_style())
+        self.bouton_reessayer.setEnabled(False)
         self.bouton_pause.setEnabled(False)
         self.bouton_arreter.setEnabled(False)
         self.bouton_test.clicked.connect(lambda: self.demarrer_enrichissement(self.TEST_LIMIT))
         self.bouton_enrichir.clicked.connect(lambda: self.demarrer_enrichissement(None))
+        self.bouton_reessayer.clicked.connect(self.reinitialiser_sans_resultat)
         self.bouton_pause.clicked.connect(self.basculer_pause)
         self.bouton_arreter.clicked.connect(self.demander_arret)
         action_layout.addWidget(self.bouton_test)
         action_layout.addWidget(self.bouton_enrichir, 1)
+        action_layout.addWidget(self.bouton_reessayer)
         action_layout.addWidget(self.bouton_pause)
         action_layout.addWidget(self.bouton_arreter)
         control_card.content_layout.addLayout(action_layout)
@@ -212,7 +227,9 @@ class TreatmentPage(QWidget):
         for column in range(4):
             stats_grid.setColumnStretch(column, 1)
         self.stat_cards = {
-            "traites": StatCard("Prospects enrichis", "0", "✅"),
+            "traites": StatCard("Traités", "0", "🔎"),
+            "enrichis": StatCard("Enrichis", "0", "✅"),
+            "sans_resultat": StatCard("Sans résultat", "0", "➖"),
             "erreurs": StatCard("Erreurs", "0", "⚠️"),
             "telephones": StatCard("Téléphones", "0", "📞"),
             "sites": StatCard("Sites web", "0", "🌐"),
@@ -220,6 +237,11 @@ class TreatmentPage(QWidget):
             "facebook": StatCard("Facebook", "0", "📘"),
             "linkedin": StatCard("LinkedIn", "0", "💼"),
             "instagram": StatCard("Instagram", "0", "📸"),
+            "source_pages_jaunes": StatCard("PagesJaunes", "0", "🟡"),
+            "source_google_maps": StatCard("Google Maps", "0", "📍"),
+            "source_siren": StatCard("Réutilisation SIREN", "0", "🔁"),
+            "source_web": StatCard("Web secours", "0", "🔎"),
+            "api_siren_resolved": StatCard("Contexte API SIREN", "0", "🏢"),
         }
         for index, card in enumerate(self.stat_cards.values()):
             card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -294,8 +316,10 @@ class TreatmentPage(QWidget):
                 "Créez ou ouvrez un projet depuis le Dashboard."
             )
             self.bouton_importer.setEnabled(False)
+            self.bouton_aliases.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
+            self.bouton_reessayer.setEnabled(False)
             return
 
         context = self.datasource_resolver.resolve()
@@ -315,8 +339,10 @@ class TreatmentPage(QWidget):
                 "→ déploiement vers le commercial."
             )
             self.bouton_importer.setEnabled(False)
+            self.bouton_aliases.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
+            self.bouton_reessayer.setEnabled(False)
             return
 
         project = context.project or ApplicationState.get_project()
@@ -327,22 +353,24 @@ class TreatmentPage(QWidget):
                 "Créez ou ouvrez un projet depuis le Dashboard."
             )
             self.bouton_importer.setEnabled(False)
+            self.bouton_aliases.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
+            self.bouton_reessayer.setEnabled(False)
             return
 
-        remaining = self.enrichment_service.compter_a_enrichir(
-            project.database
-        )
-        self.label_projet.setText(
-            f"Projet actif : {project.name}"
-        )
+        remaining = self.enrichment_service.compter_a_enrichir(project.database)
+        without_result = self.enrichment_service.compter_sans_resultat(project.database)
+        self.label_projet.setText(f"Projet actif : {project.name}")
         self.label_details.setText(
-            f"{remaining} prospect(s) restant(s) à enrichir."
+            f"{remaining} prospect(s) restant(s) à enrichir | "
+            f"{without_result} sans résultat retraitable(s)."
         )
         self.bouton_importer.setEnabled(True)
-        self.bouton_test.setEnabled(True)
-        self.bouton_enrichir.setEnabled(True)
+        self.bouton_aliases.setEnabled(bool(self.fichier_excel))
+        self.bouton_test.setEnabled(remaining > 0)
+        self.bouton_enrichir.setEnabled(remaining > 0)
+        self.bouton_reessayer.setEnabled(without_result > 0)
 
     def choisir_excel(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -357,6 +385,9 @@ class TreatmentPage(QWidget):
             self.label_details.setText(
                 f"{self.excel_service.row_count} lignes | {len(self.excel_service.columns)} colonnes"
             )
+            if ApplicationState.has_project():
+                context = self.datasource_resolver.resolve()
+                self.bouton_aliases.setEnabled(not context.is_cloud)
         except Exception as exc:
             QMessageBox.critical(self, "Erreur", f"Impossible de lire le fichier :\n{exc}")
 
@@ -395,6 +426,56 @@ class TreatmentPage(QWidget):
             )
             return answer == QMessageBox.Yes
 
+    def mettre_a_jour_noms_recherche(self):
+        """Ajoute les enseignes/sigles du fichier aux prospects déjà importés."""
+        if not ApplicationState.has_project():
+            QMessageBox.warning(self, "Attention", "Créez d'abord un projet depuis le Dashboard.")
+            return
+        if not self.fichier_excel:
+            QMessageBox.warning(self, "Attention", "Choisissez d'abord le fichier Excel source.")
+            return
+
+        context = self.datasource_resolver.resolve()
+        if context.is_cloud:
+            QMessageBox.warning(
+                self,
+                "Projet Cloud",
+                "La mise à jour des noms de recherche doit être faite sur le projet local avant déploiement.",
+            )
+            return
+
+        project = context.project or ApplicationState.get_project()
+        if not self._create_recovery_point("search_names", project):
+            return
+
+        try:
+            stats = self.import_service.mettre_a_jour_noms_recherche_depuis_excel(
+                self.fichier_excel,
+                project.database,
+            )
+            updated = int(stats.get("mis_a_jour", 0))
+            ActivityService.record(
+                "Noms de recherche mis à jour",
+                f"{updated} prospect(s) enrichi(s) avec enseigne/sigle/nom usuel.",
+                category="enrichment",
+                level="success",
+                metadata=stats,
+            )
+            NotificationManager.success(
+                "Noms de recherche ajoutés",
+                f"{updated} prospect(s) disposent maintenant d'enseignes, sigles ou noms usuels supplémentaires.",
+            )
+            self.log(
+                f"🏷️ Lot 2 : {updated} prospect(s) mis à jour avec des noms de recherche alternatifs."
+            )
+            if stats.get("ambigus_siren"):
+                self.log(
+                    f"ℹ️ {stats['ambigus_siren']} ligne(s) ignorée(s) car le SIREN correspond à plusieurs établissements sans SIRET exploitable."
+                )
+            self.rafraichir()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erreur mise à jour", str(exc))
+
     def importer_dans_sqlite(self):
         if not ApplicationState.has_project():
             QMessageBox.warning(self, "Attention", "Créez d'abord un projet depuis le Dashboard.")
@@ -417,9 +498,61 @@ class TreatmentPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Erreur import", str(exc))
 
+    def reinitialiser_sans_resultat(self):
+        if self.enrichment_running or not ApplicationState.has_project():
+            return
+        project = ApplicationState.get_project()
+        count = self.enrichment_service.compter_sans_resultat(project.database)
+        if count <= 0:
+            NotificationManager.info(
+                "Aucun prospect à retraiter",
+                "Aucun prospect n'est actuellement marqué sans résultat.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Retenter les prospects sans résultat",
+            f"{count} prospect(s) vont redevenir disponibles pour l'enrichissement.\n\n"
+            "Les coordonnées déjà présentes seront conservées. Seuls le statut "
+            "et la date de collecte seront réinitialisés.\n\n"
+            "Voulez-vous continuer ?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        if not self._create_recovery_point("retry_no_result", project):
+            return
+
+        reset_count = self.enrichment_service.reinitialiser_sans_resultat(
+            project.database
+        )
+        ActivityService.record(
+            "Prospects remis en attente d'enrichissement",
+            f"{reset_count} prospect(s) sans résultat réinitialisé(s).",
+            category="enrichment",
+            level="info",
+            metadata={"total": reset_count},
+        )
+        NotificationManager.success(
+            "Prospects prêts à être retraités",
+            f"{reset_count} prospect(s) peuvent maintenant être enrichis à nouveau.",
+        )
+        self.log(f"↻ {reset_count} prospect(s) sans résultat remis en attente.")
+        self.rafraichir()
+
     def _set_enrichment_running(self, running):
         self.enrichment_running = running
-        for button in (self.bouton_excel, self.bouton_importer, self.bouton_test, self.bouton_enrichir):
+        for button in (
+            self.bouton_excel,
+            self.bouton_importer,
+            self.bouton_aliases,
+            self.bouton_test,
+            self.bouton_enrichir,
+            self.bouton_reessayer,
+        ):
             button.setEnabled(not running)
         self.bouton_pause.setEnabled(running)
         self.bouton_arreter.setEnabled(running)
@@ -495,8 +628,7 @@ class TreatmentPage(QWidget):
         completed = stats.get("completed", 0)
         total = stats.get("total", 0)
         percentage = stats.get("percentage", 0)
-        successful = stats.get("traites", 0)
-        errors = stats.get("erreurs", 0)
+        successful = stats.get("enrichis", 0)
         success_rate = (successful / completed * 100) if completed else 0
 
         self.progression.setValue(percentage)
@@ -550,12 +682,29 @@ class TreatmentPage(QWidget):
 
         self.current_company_card.set_info(
             "Traitement interrompu" if interrupted else "Enrichissement terminé",
-            f"{result.get('traites', 0)} enrichi(s), {result.get('erreurs', 0)} erreur(s)",
+            f"{result.get('enrichis', 0)} enrichi(s), "
+            f"{result.get('sans_resultat', 0)} sans résultat, "
+            f"{result.get('erreurs', 0)} erreur(s)",
         )
         self.log("⏹ Enrichissement interrompu." if interrupted else "✅ Enrichissement terminé.")
+        self.log(
+            "📊 Apports sources — "
+            f"PagesJaunes: {result.get('source_pages_jaunes', 0)} | "
+            f"Google Maps: {result.get('source_google_maps', 0)} | "
+            f"SIREN réutilisé: {result.get('source_siren', 0)} | "
+            f"Web secours: {result.get('source_web', 0)}"
+        )
+        self.log(
+            "🏢 API SIREN — "
+            f"{result.get('api_requests', 0)} requête(s) réseau | "
+            f"{result.get('api_cache_hits', 0)} cache | "
+            f"{result.get('api_failures', 0)} échec(s)"
+        )
         ActivityService.record(
             "Enrichissement interrompu" if interrupted else "Enrichissement terminé",
-            f"{result.get('traites', 0)} enrichi(s), {result.get('erreurs', 0)} erreur(s).",
+            f"{result.get('enrichis', 0)} enrichi(s), "
+            f"{result.get('sans_resultat', 0)} sans résultat, "
+            f"{result.get('erreurs', 0)} erreur(s).",
             category="enrichment",
             level="warning" if interrupted else "success",
             metadata=result,
@@ -563,12 +712,14 @@ class TreatmentPage(QWidget):
         if interrupted:
             NotificationManager.warning(
                 "Enrichissement interrompu",
-                f"{result.get('traites', 0)} prospect(s) enrichi(s). La reprise reste possible.",
+                f"{result.get('enrichis', 0)} prospect(s) enrichi(s). La reprise reste possible.",
             )
         else:
             NotificationManager.success(
                 "Enrichissement terminé",
-                f"{result.get('traites', 0)} prospect(s) enrichi(s), {result.get('erreurs', 0)} erreur(s).",
+                f"{result.get('enrichis', 0)} enrichi(s), "
+                f"{result.get('sans_resultat', 0)} sans résultat, "
+                f"{result.get('erreurs', 0)} erreur(s).",
             )
         self.rafraichir()
 

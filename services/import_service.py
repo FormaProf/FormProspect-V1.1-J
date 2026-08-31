@@ -1,3 +1,4 @@
+import json
 import re
 import sqlite3
 from core.sqlite_utils import connect_database
@@ -126,6 +127,83 @@ class ImportService:
             if str(part or "").strip()
         ).strip()
 
+    def _noms_recherche(self, row, colonnes):
+        """Retourne les noms publics alternatifs utiles à l'enrichissement.
+
+        Ordre volontaire : dénomination usuelle / enseignes d'établissement,
+        puis sigle, puis nom d'usage de l'entrepreneur individuel. Le nom
+        principal reste dans la colonne ``entreprise`` et n'est pas dupliqué
+        ici.
+        """
+        entreprise = self._nom_entreprise(row, colonnes)
+        candidats = [
+            self._valeur(row, colonnes, [
+                "denominationUsuelleEtablissement",
+                "denomination usuelle etablissement",
+                "dénomination usuelle établissement",
+                "nom commercial",
+                "nom_commercial",
+            ]),
+            self._valeur(row, colonnes, [
+                "enseigne1Etablissement", "enseigne 1 etablissement",
+                "enseigne1", "enseigne",
+            ]),
+            self._valeur(row, colonnes, [
+                "enseigne2Etablissement", "enseigne 2 etablissement",
+                "enseigne2",
+            ]),
+            self._valeur(row, colonnes, [
+                "enseigne3Etablissement", "enseigne 3 etablissement",
+                "enseigne3",
+            ]),
+            self._valeur(row, colonnes, [
+                "sigleUniteLegale", "sigle unite legale", "sigle",
+            ]),
+        ]
+
+        nom = self._valeur(row, colonnes, [
+            "nomUsageUniteLegale", "nom usage unite legale",
+            "nomUniteLegale", "nom unite legale", "nom",
+        ])
+        prenom = self._valeur(row, colonnes, [
+            "prenomUsuelUniteLegale", "prenom usuel unite legale",
+            "prenom1UniteLegale", "prenom1 unite legale", "prenom",
+        ])
+        nom_personne = " ".join(part for part in (prenom, nom) if part).strip()
+        if nom_personne:
+            candidats.append(nom_personne)
+
+        principal_key = self._normaliser_nom_colonne(entreprise) if entreprise else ""
+        resultat = []
+        vus = set()
+        placeholders = {
+            "nd", "n/d", "na", "n/a", "nr", "n/r",
+            "nonrenseigne", "nonrenseignee", "nondiffuse", "nondiffusee",
+        }
+
+        for valeur in candidats:
+            valeur = str(valeur or "").strip()
+            if not valeur:
+                continue
+            key = self._normaliser_nom_colonne(valeur)
+            # Les exports SIRENE utilisent parfois des marqueurs tels que
+            # [ND], N/D ou N/A. Ils ne doivent jamais devenir des alias de
+            # recherche (ex. "[ND] [ND]").
+            if not key or key in placeholders or key == principal_key or key in vus:
+                continue
+            # Si un nom de personne n'est composé que de marqueurs absents
+            # ([ND] [ND], N/A N/A...), la normalisation produit une simple
+            # répétition du même placeholder. On le rejette aussi.
+            if any(key == marker * repeat for marker in placeholders for repeat in (2, 3)):
+                continue
+            vus.add(key)
+            resultat.append(valeur)
+        return resultat
+
+    @staticmethod
+    def _serialiser_noms_recherche(noms):
+        return json.dumps(list(noms or []), ensure_ascii=False)
+
     def importer_excel_vers_sqlite(self, fichier_excel, database_path):
         init_database(database_path)
 
@@ -139,6 +217,9 @@ class ImportService:
 
         for _, row in df.iterrows():
             entreprise = self._nom_entreprise(row, colonnes)
+            noms_recherche = self._serialiser_noms_recherche(
+                self._noms_recherche(row, colonnes)
+            )
 
             siret = self._valeur(row, colonnes, [
                 "siret",
@@ -271,9 +352,10 @@ class ImportService:
                     entreprise, siret, siren, adresse, code_postal, ville, code_naf,
                     telephone, site_web, email, facebook, linkedin, instagram, youtube,
                     statut_enrichissement, date_collecte, pipeline, priorite,
-                    prochaine_action, date_prochaine_action, commercial_assigne
+                    prochaine_action, date_prochaine_action, commercial_assigne,
+                    noms_recherche
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', 'Importé', '', ?, ?, ?, '', '')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', 'Importé', '', ?, ?, ?, '', '', ?)
             """, (
                 entreprise,
                 siret,
@@ -288,6 +370,7 @@ class ImportService:
                 PIPELINE_DEFAULT,
                 PRIORITE_DEFAULT,
                 ACTION_DEFAULT,
+                noms_recherche,
             ))
 
             total += 1
@@ -296,6 +379,85 @@ class ImportService:
         conn.close()
 
         return total
+
+    def mettre_a_jour_noms_recherche_depuis_excel(self, fichier_excel, database_path):
+        """Ajoute enseignes/sigles/noms usuels aux prospects déjà importés.
+
+        Cette opération n'insère aucune ligne. La correspondance se fait par
+        SIRET exact. Le SIREN n'est utilisé qu'en secours lorsqu'il ne pointe
+        que vers un unique prospect local, afin d'éviter d'appliquer une
+        enseigne d'établissement à plusieurs établissements du même SIREN.
+        """
+        init_database(database_path)
+        df = pd.read_excel(fichier_excel, dtype=str).fillna("")
+        colonnes = self._normaliser_colonnes(df)
+        conn = connect_database(database_path)
+        cur = conn.cursor()
+        stats = {
+            "lignes_excel": 0,
+            "mis_a_jour": 0,
+            "sans_alias": 0,
+            "sans_identifiant": 0,
+            "introuvables": 0,
+            "ambigus_siren": 0,
+        }
+        try:
+            for _, row in df.iterrows():
+                stats["lignes_excel"] += 1
+                noms = self._noms_recherche(row, colonnes)
+                if not noms:
+                    stats["sans_alias"] += 1
+                    continue
+
+                siret = self._valeur(row, colonnes, [
+                    "siret", "numero siret", "numéro siret",
+                    "siret etablissement", "siret établissement",
+                ])
+                siren = self._valeur(row, colonnes, [
+                    "siren", "numero siren", "numéro siren",
+                    "siren unite legale", "siren unité légale",
+                ])
+                if not siret and not siren:
+                    stats["sans_identifiant"] += 1
+                    continue
+
+                ids = []
+                if siret:
+                    cur.execute(
+                        "SELECT id FROM prospects WHERE TRIM(COALESCE(siret,'')) = ? ORDER BY id",
+                        (siret,),
+                    )
+                    ids = [row_id for (row_id,) in cur.fetchall()]
+
+                if not ids and siren:
+                    cur.execute(
+                        "SELECT id FROM prospects WHERE TRIM(COALESCE(siren,'')) = ? ORDER BY id",
+                        (siren,),
+                    )
+                    siren_ids = [row_id for (row_id,) in cur.fetchall()]
+                    if len(siren_ids) == 1:
+                        ids = siren_ids
+                    elif len(siren_ids) > 1:
+                        stats["ambigus_siren"] += 1
+                        continue
+
+                if not ids:
+                    stats["introuvables"] += 1
+                    continue
+
+                payload = self._serialiser_noms_recherche(noms)
+                for prospect_id in ids:
+                    cur.execute(
+                        "UPDATE prospects SET noms_recherche = ? WHERE id = ?",
+                        (payload, prospect_id),
+                    )
+                    if cur.rowcount:
+                        stats["mis_a_jour"] += 1
+
+            conn.commit()
+            return stats
+        finally:
+            conn.close()
 
     def reparer_noms_entreprises_depuis_excel(self, fichier_excel, database_path):
         """

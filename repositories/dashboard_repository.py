@@ -69,6 +69,15 @@ class DashboardRepository(BaseRepository):
             """
         )
 
+    def count_no_reliable_result(self):
+        return self._fetch_one_value(
+            """
+            SELECT COUNT(*)
+            FROM prospects
+            WHERE COALESCE(TRIM(statut_enrichissement), '') = 'Aucun résultat fiable'
+            """
+        )
+
     def count_by_pipeline(self):
         conn = self.get_connection()
         try:

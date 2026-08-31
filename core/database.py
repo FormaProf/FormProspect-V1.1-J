@@ -74,6 +74,12 @@ def init_database(database_path):
     if not colonne_existe(cur, "prospects", "commercial_assigne"):
         cur.execute("ALTER TABLE prospects ADD COLUMN commercial_assigne TEXT DEFAULT ''")
 
+    # Lot 2 : noms alternatifs destinés uniquement à la recherche publique
+    # (enseigne, dénomination usuelle, sigle, nom d'usage). Le nom principal
+    # reste stocké dans ``entreprise`` afin de ne pas modifier le CRM.
+    if not colonne_existe(cur, "prospects", "noms_recherche"):
+        cur.execute("ALTER TABLE prospects ADD COLUMN noms_recherche TEXT DEFAULT ''")
+
     scoring_columns = {
         "score_prospect": "INTEGER DEFAULT 0",
         "score_grade": "TEXT DEFAULT '★☆☆☆☆'",

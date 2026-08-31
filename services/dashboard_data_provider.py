@@ -80,8 +80,10 @@ class LocalDashboardDataProvider(DashboardDataProvider):
         )
 
         enriched = repo.count_enriched()
+        no_reliable_result = repo.count_no_reliable_result()
         enrichment_errors = repo.count_enrichment_errors()
-        remaining = max(0, total - enriched)
+        treated = enriched + no_reliable_result + enrichment_errors
+        remaining = max(0, total - treated)
 
         return {
             "kpi": {

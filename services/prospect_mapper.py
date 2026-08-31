@@ -15,13 +15,21 @@ class ProspectMapper:
         "statut_enrichissement", "date_collecte", "pipeline", "priorite",
         "prochaine_action", "date_prochaine_action", "commercial_assigne",
         "score_prospect", "score_grade", "score_label", "score_details",
-        "date_score",
+        "date_score", "mobile",
     )
 
     @classmethod
     def from_sqlite(cls, row: Any) -> dict[str, Any]:
         s = cls._to_mapping(row)
-        phone, mobile = cls._phones(s.get("telephone"))
+        phone, mobile = cls._phones(
+            " / ".join(
+                value for value in (
+                    cls._text(s.get("telephone")),
+                    cls._text(s.get("mobile")),
+                )
+                if value
+            )
+        )
 
         payload = {
             "company_name": cls._text(s.get("entreprise")),
@@ -34,7 +42,7 @@ class ProspectMapper:
             "phone": phone,
             "mobile": mobile,
             "website": cls._url(s.get("site_web")),
-            "email": cls._text(s.get("email")),
+            "email": cls._email(s.get("email")),
             "facebook": cls._url(s.get("facebook")),
             "linkedin": cls._url(s.get("linkedin")),
             "instagram": cls._url(s.get("instagram")),
@@ -97,65 +105,108 @@ class ProspectMapper:
         return value if len(value) == length else ""
 
     @classmethod
-    def _phones(cls, value) -> tuple[str, str]:
-        """Extrait jusqu'à deux numéros distincts sans fusionner les lignes.
+    def _email(cls, value):
+        """Retourne un e-mail exploitable par le Cloud, sinon une valeur vide.
 
-        Les cellules locales peuvent contenir plusieurs numéros séparés par
-        des retours à la ligne, '/', ';', '|' ou ','. Chaque bloc est analysé
-        séparément afin qu'un couple de numéros ne soit jamais interprété
-        comme un seul numéro trop long.
+        La donnée locale d'origine n'est jamais modifiée : seul le payload de
+        synchronisation est assaini afin qu'une adresse issue de
+        l'enrichissement ne bloque pas un lot complet.
+        """
+        value = cls._text(value)
+        if not value:
+            return ""
+
+        # Le champ CRM représente une seule adresse. Si une source contient
+        # plusieurs valeurs, on retient la première adresse syntaxiquement
+        # plausible et on laisse la donnée locale intacte.
+        candidates = [
+            part.strip()
+            for part in re.split(r"[\r\n;,/|]+", value)
+            if part.strip()
+        ]
+        pattern = re.compile(
+            r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+            r"[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?"
+            r"(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$",
+            re.IGNORECASE,
+        )
+        for candidate in candidates:
+            if len(candidate) <= 320 and pattern.fullmatch(candidate):
+                return candidate
+        return ""
+
+    @classmethod
+    def _phones(cls, value) -> tuple[str, str]:
+        """Classe tous les numéros locaux en Téléphone et Mobile.
+
+        Règle métier Form@Prospect :
+        - 06 / 07 => ``mobile`` ;
+        - autres numéros français valides => ``phone`` ;
+        - aucun nombre arbitraire n'est supprimé : tous les numéros valides
+          sont conservés, dédupliqués et séparés par `` / ``.
+
+        Les anciens projets utilisant des retours à la ligne, ``;``, ``|``
+        ou ``,`` restent compatibles. Les numéros +33 sont normalisés en
+        format national avant classement.
         """
         value = cls._text(value)
         if not value:
             return "", ""
 
-        # Sépare d'abord les numéros multiples. Important : ne pas utiliser
-        # ``\\s`` dans le motif principal car il inclut les retours à la ligne.
         chunks = [
             part.strip()
             for part in re.split(r"[\r\n;/|,]+", value)
             if part.strip()
         ]
 
-        valid: list[str] = []
+        phones: list[str] = []
+        mobiles: list[str] = []
+        seen: set[str] = set()
+
+        def normalize(candidate: str) -> str:
+            raw = str(candidate or "").strip()
+            digits = re.sub(r"\D", "", raw)
+
+            # +33 X XX XX XX XX / 0033 X XX XX XX XX -> 0X XX XX XX XX
+            if raw.startswith("+33") and len(digits) == 11 and digits.startswith("33"):
+                digits = "0" + digits[2:]
+            elif raw.startswith("0033") and len(digits) == 13 and digits.startswith("0033"):
+                digits = "0" + digits[4:]
+
+            if len(digits) != 10 or not digits.startswith("0"):
+                return ""
+            if digits[1] == "0":
+                return ""
+
+            return " ".join(digits[i:i + 2] for i in range(0, 10, 2))
 
         for chunk in chunks:
-            # Peut aussi récupérer un numéro au milieu d'un petit libellé.
+            # Les sources d'enrichissement fournissent normalement un numéro
+            # par bloc. Ce motif permet aussi les petits libellés tels que
+            # "Tél : 04 90 00 00 00" sans absorber une longue chaîne de
+            # chiffres sans séparateur métier.
             candidates = re.findall(
-                r"\+?\d(?:[ \t().-]*\d){5,14}",
+                r"(?<!\d)(?:\+33\s?|0033\s?|0)[1-9](?:[ .\-]?\d{2}){4}(?!\d)",
                 chunk,
             )
-
             if not candidates:
                 candidates = [chunk]
 
             for candidate in candidates:
-                candidate = re.sub(r"[ \t]+", " ", candidate).strip(" .,-")
-                digits = re.sub(r"\D", "", candidate)
-
-                if not (6 <= len(digits) <= 15):
+                normalized = normalize(candidate)
+                if not normalized:
                     continue
-                if len(candidate) > 50:
+                key = re.sub(r"\D", "", normalized)
+                if key in seen:
                     continue
-                if not re.fullmatch(r"[0-9+().\-\s]+", candidate):
-                    continue
+                seen.add(key)
 
-                # Déduplication sur les chiffres.
-                if any(
-                    re.sub(r"\D", "", existing) == digits
-                    for existing in valid
-                ):
-                    continue
+                if key.startswith(("06", "07")):
+                    mobiles.append(normalized)
+                else:
+                    phones.append(normalized)
 
-                valid.append(candidate)
-
-                if len(valid) == 2:
-                    return valid[0], valid[1]
-
-        return (
-            valid[0] if len(valid) >= 1 else "",
-            valid[1] if len(valid) >= 2 else "",
-        )
+        return " / ".join(phones), " / ".join(mobiles)
 
     @classmethod
     def _url(cls, value):
