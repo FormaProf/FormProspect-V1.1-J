@@ -1,6 +1,6 @@
 from math import ceil
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThread, QThreadPool, Qt, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
     QGraphicsDropShadowEffect,
+    QProgressDialog,
 )
 
 from core.constants import PRIMARY_COLOR
@@ -21,6 +22,7 @@ from core.application_state import ApplicationState
 from core.datasource_resolver import DataSourceResolver
 from core.crm import PIPELINE, PRIORITES
 from services.prospect_service import ProspectService
+from services.enrichment_service import EnrichmentService
 from services.export_service import ExportService
 from ui.dialogs.prospect_dialog import ProspectDialog
 from ui.dialogs.client_onboarding_wizard import ClientOnboardingWizard
@@ -29,7 +31,8 @@ from ui.widgets.crm.filters_bar import CRMFiltersBar
 from ui.widgets.crm.prospects_table import ProspectsTableWidget
 from ui.widgets.crm.kanban_view import KanbanView
 from ui.components.notifications import NotificationManager
-from services.system import ActivityService
+from services.system import ActivityService, RecoveryManager
+from workers.enrichment_worker import EnrichmentWorker
 from core.session import SessionState
 from services.cloud_runtime import CloudRuntime
 
@@ -79,6 +82,7 @@ class ProspectsPage(QWidget):
             resolver=self.datasource_resolver,
         )
         self.export_service = ExportService()
+        self.recovery_manager = RecoveryManager()
         self.current_prospects = []
         self.page_courante = 1
         self.total_filtre_courant = 0
@@ -93,6 +97,10 @@ class ProspectsPage(QWidget):
         self._load_generation = 0
         self._filter_options_loaded = False
         self._pending_pipeline_changes = set()
+
+        self._selection_enrichment_thread = None
+        self._selection_enrichment_worker = None
+        self._selection_enrichment_dialog = None
 
         self.setStyleSheet("background:#F8FAFD;")
 
@@ -249,6 +257,17 @@ class ProspectsPage(QWidget):
             bouton.setFixedHeight(40)
             bouton.setStyleSheet(self.style_bouton_vue())
 
+        self.bouton_enrichir_selection = QPushButton("↻  Enrichir la sélection")
+        self.bouton_enrichir_selection.setFixedHeight(40)
+        self.bouton_enrichir_selection.setToolTip(
+            "Sélectionnez une ou plusieurs lignes (Ctrl/Maj), puis relancez "
+            "l'enrichissement uniquement sur ces prospects."
+        )
+        self.bouton_enrichir_selection.clicked.connect(
+            self.enrichir_selection
+        )
+        self.bouton_enrichir_selection.setEnabled(False)
+
         self.bouton_exporter = QPushButton("⇩  Exporter Excel")
         self.bouton_exporter.setFixedHeight(40)
         self.bouton_exporter.clicked.connect(self.exporter_excel)
@@ -265,6 +284,9 @@ class ProspectsPage(QWidget):
         bouton_scoring.setFixedHeight(40)
         bouton_scoring.clicked.connect(self.recalculer_scores)
 
+        self.bouton_enrichir_selection.setStyleSheet(
+            self.style_bouton_principal()
+        )
         self.bouton_exporter.setStyleSheet(self.style_bouton_secondaire())
         bouton_scoring.setStyleSheet(self.style_bouton_principal())
 
@@ -272,6 +294,7 @@ class ProspectsPage(QWidget):
         toolbar_layout.addWidget(self.bouton_kanban)
         toolbar_layout.addSpacing(8)
         toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.bouton_enrichir_selection)
         toolbar_layout.addWidget(self.bouton_exporter)
         toolbar_layout.addWidget(bouton_scoring)
 
@@ -335,6 +358,9 @@ class ProspectsPage(QWidget):
 
         self.table = ProspectsTableWidget()
         self.table.prospect_double_clicked.connect(self.ouvrir_fiche_prospect)
+        self.table.itemSelectionChanged.connect(
+            self._mettre_a_jour_bouton_enrichissement_selection
+        )
         self.table.setStyleSheet("""
             QTableWidget, QTableView {
                 background:#FFFFFF;
@@ -517,6 +543,7 @@ class ProspectsPage(QWidget):
     def changer_vue(self, view_id):
         self.views_stack.setCurrentIndex(view_id)
         self.afficher_donnees_vue_active()
+        self._mettre_a_jour_bouton_enrichissement_selection()
 
     def afficher_donnees_vue_active(self):
         premier_numero = self.offset_courant() + 1
@@ -1085,6 +1112,254 @@ class ProspectsPage(QWidget):
         )
 
 
+
+    def _mettre_a_jour_bouton_enrichissement_selection(self):
+        if not hasattr(self, "bouton_enrichir_selection"):
+            return
+
+        selected_ids = (
+            self.table.selected_prospect_ids()
+            if hasattr(self, "table")
+            else []
+        )
+        running = self._selection_enrichment_worker is not None
+        local_ready = (
+            self._has_data_source()
+            and not self._is_cloud()
+            and self.views_stack.currentIndex() == 0
+        )
+        self.bouton_enrichir_selection.setEnabled(
+            local_ready and bool(selected_ids) and not running
+        )
+        if selected_ids:
+            self.bouton_enrichir_selection.setText(
+                f"↻  Enrichir la sélection ({len(selected_ids)})"
+            )
+        else:
+            self.bouton_enrichir_selection.setText(
+                "↻  Enrichir la sélection"
+            )
+
+    def _creer_point_restauration_enrichissement(self, project):
+        try:
+            point = self.recovery_manager.before_enrichment(project=project)
+            NotificationManager.success(
+                "Point de restauration créé",
+                f"Sauvegarde avant enrichissement : {point.path.name}",
+            )
+            return True
+        except Exception as exc:
+            answer = QMessageBox.question(
+                self,
+                "Sauvegarde automatique impossible",
+                "Form@Prospect n'a pas pu créer le point de restauration.\n\n"
+                f"Détail : {exc}\n\n"
+                "Voulez-vous continuer sans sauvegarde automatique ?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return answer == QMessageBox.Yes
+
+    def enrichir_selection(self):
+        if self._selection_enrichment_worker is not None:
+            return
+        if not self._has_data_source():
+            QMessageBox.warning(self, "Enrichissement", "Aucun projet actif.")
+            return
+        if self._is_cloud():
+            QMessageBox.information(
+                self,
+                "Enrichissement",
+                "L'enrichissement ciblé doit être réalisé sur le projet local "
+                "avant son déploiement Cloud.",
+            )
+            return
+        if self.views_stack.currentIndex() != 0:
+            QMessageBox.information(
+                self,
+                "Enrichissement",
+                "Passez en vue Tableau pour sélectionner les prospects à "
+                "enrichir.",
+            )
+            return
+
+        prospect_ids = self.table.selected_prospect_ids()
+        if not prospect_ids:
+            QMessageBox.information(
+                self,
+                "Enrichissement",
+                "Sélectionnez une ou plusieurs lignes dans le tableau.",
+            )
+            return
+
+        count = len(prospect_ids)
+        answer = QMessageBox.question(
+            self,
+            "Enrichir la sélection",
+            f"Vous allez réenrichir {count} prospect(s) sélectionné(s).\n\n"
+            "Cette action fonctionne même si certains sont déjà enrichis. "
+            "Leurs coordonnées d'enrichissement seront recalculées : une "
+            "ancienne valeur peut être remplacée ou supprimée si elle n'est "
+            "plus retrouvée de façon fiable.\n\n"
+            "En cas d'erreur technique, les anciennes coordonnées sont "
+            "conservées.\n\n"
+            "Voulez-vous continuer ?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        project = ApplicationState.get_project()
+        if not self._creer_point_restauration_enrichissement(project):
+            return
+
+        self._selection_enrichment_thread = QThread(self)
+        self._selection_enrichment_worker = EnrichmentWorker(
+            str(project.database),
+            mode=EnrichmentService.MODE_SELECTED,
+            prospect_ids=prospect_ids,
+        )
+        self._selection_enrichment_worker.moveToThread(
+            self._selection_enrichment_thread
+        )
+
+        dialog = QProgressDialog(
+            "Préparation de l'enrichissement ciblé...",
+            "Arrêter",
+            0,
+            count,
+            self,
+        )
+        dialog.setWindowTitle("Enrichissement de la sélection")
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+        self._selection_enrichment_dialog = dialog
+
+        self._selection_enrichment_thread.started.connect(
+            self._selection_enrichment_worker.run
+        )
+        self._selection_enrichment_worker.progress.connect(
+            self._on_selection_enrichment_progress
+        )
+        self._selection_enrichment_worker.finished.connect(
+            self._on_selection_enrichment_finished
+        )
+        self._selection_enrichment_worker.failed.connect(
+            self._on_selection_enrichment_failed
+        )
+        self._selection_enrichment_worker.finished.connect(
+            self._selection_enrichment_thread.quit
+        )
+        self._selection_enrichment_worker.failed.connect(
+            self._selection_enrichment_thread.quit
+        )
+        self._selection_enrichment_thread.finished.connect(
+            self._cleanup_selection_enrichment
+        )
+        dialog.canceled.connect(
+            self._selection_enrichment_worker.request_stop
+        )
+
+        ActivityService.record(
+            "Enrichissement ciblé démarré",
+            f"{count} prospect(s) sélectionné(s).",
+            category="enrichment",
+            level="info",
+            metadata={"total": count, "mode": EnrichmentService.MODE_SELECTED},
+        )
+        self._mettre_a_jour_bouton_enrichissement_selection()
+        dialog.show()
+        self._selection_enrichment_thread.start()
+
+    def _on_selection_enrichment_progress(self, stats):
+        dialog = self._selection_enrichment_dialog
+        if dialog is None:
+            return
+        completed = int(stats.get("completed", 0) or 0)
+        total = int(stats.get("total", dialog.maximum()) or dialog.maximum())
+        dialog.setMaximum(max(1, total))
+        dialog.setValue(min(completed, dialog.maximum()))
+        entreprise = stats.get("entreprise") or "Prospect"
+        message = stats.get("message") or "Traitement en cours"
+        dialog.setLabelText(f"{entreprise}\n{message}")
+
+    def _on_selection_enrichment_finished(self, result):
+        dialog = self._selection_enrichment_dialog
+        if dialog is not None:
+            if not result.get("interrompu"):
+                dialog.setValue(dialog.maximum())
+            dialog.close()
+
+        enrichis = int(result.get("enrichis", 0) or 0)
+        sans_resultat = int(result.get("sans_resultat", 0) or 0)
+        erreurs = int(result.get("erreurs", 0) or 0)
+        interrompu = bool(result.get("interrompu"))
+
+        ActivityService.record(
+            "Enrichissement ciblé interrompu"
+            if interrompu
+            else "Enrichissement ciblé terminé",
+            f"{enrichis} enrichi(s), {sans_resultat} sans résultat, "
+            f"{erreurs} erreur(s).",
+            category="enrichment",
+            level="warning" if interrompu else "success",
+            metadata=result,
+        )
+
+        if interrompu:
+            NotificationManager.warning(
+                "Enrichissement interrompu",
+                f"{result.get('traites', 0)} prospect(s) traité(s).",
+            )
+        else:
+            NotificationManager.success(
+                "Enrichissement de la sélection terminé",
+                f"{enrichis} enrichi(s), {sans_resultat} sans résultat, "
+                f"{erreurs} erreur(s).",
+            )
+
+        self.prospect_service.invalider_caches(
+            statistiques=True,
+            filtres=True,
+        )
+        self._filter_options_loaded = False
+        self.appliquer_filtres(
+            reset_page=False,
+            reload_options=True,
+        )
+
+    def _on_selection_enrichment_failed(self, message):
+        dialog = self._selection_enrichment_dialog
+        if dialog is not None:
+            dialog.close()
+        QMessageBox.critical(
+            self,
+            "Erreur d'enrichissement",
+            message,
+        )
+        self.prospect_service.invalider_caches(
+            statistiques=True,
+            filtres=True,
+        )
+        self._filter_options_loaded = False
+        self.appliquer_filtres(
+            reset_page=False,
+            reload_options=True,
+        )
+
+    def _cleanup_selection_enrichment(self):
+        if self._selection_enrichment_worker is not None:
+            self._selection_enrichment_worker.deleteLater()
+        if self._selection_enrichment_thread is not None:
+            self._selection_enrichment_thread.deleteLater()
+        self._selection_enrichment_worker = None
+        self._selection_enrichment_thread = None
+        self._selection_enrichment_dialog = None
+        self._mettre_a_jour_bouton_enrichissement_selection()
 
     def transformer_selection_en_client(self):
         """Compatibilité interne : conversion normale via Pipeline -> Client."""

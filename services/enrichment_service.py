@@ -21,6 +21,11 @@ class EnrichmentService:
     NO_RELIABLE_RESULT_STATUS = "Aucun résultat fiable"
     ERROR_STATUS = "Erreur enrichissement"
 
+    MODE_PENDING = "pending"
+    MODE_SELECTED = "selected"
+    MODE_ALL = "all"
+    VALID_MODES = {MODE_PENDING, MODE_SELECTED, MODE_ALL}
+
     def __init__(self):
         self.google = GoogleMapsFinder()
         self.pages_jaunes = PagesJaunesFinder()
@@ -42,21 +47,46 @@ class EnrichmentService:
                 )
         conn.commit()
 
-    def _sanitize_existing_contacts(self, conn):
+    @staticmethod
+    def _normaliser_ids(prospect_ids):
+        if prospect_ids is None:
+            return []
+        values = []
+        seen = set()
+        for value in prospect_ids:
+            try:
+                normalized = int(value)
+            except (TypeError, ValueError):
+                continue
+            if normalized <= 0 or normalized in seen:
+                continue
+            seen.add(normalized)
+            values.append(normalized)
+        return values
+
+    def _sanitize_existing_contacts(self, conn, prospect_ids=None):
         """Nettoie uniquement les faux emails techniques certains.
 
-        Le Lot 1 a pu enregistrer des adresses injectées par Wix/Sentry. On
-        supprime ces valeurs avec une règle très stricte, sans toucher aux
-        emails professionnels ordinaires (Free, Orange, Gmail, etc.).
+        Pour un enrichissement ciblé, le nettoyage est limité aux prospects
+        sélectionnés afin qu'une opération locale ne modifie pas d'autres
+        fiches du projet.
         """
         cur = conn.cursor()
-        cur.execute(
-            """
+        ids = self._normaliser_ids(prospect_ids)
+        query = """
             SELECT id, email
             FROM prospects
             WHERE COALESCE(TRIM(email),'') != ''
-            """
-        )
+        """
+        params = []
+        if prospect_ids is not None:
+            if not ids:
+                return 0
+            placeholders = ",".join("?" for _ in ids)
+            query += f" AND id IN ({placeholders})"
+            params.extend(ids)
+        cur.execute(query, params)
+
         cleaned = 0
         for prospect_id, email in cur.fetchall():
             try:
@@ -73,27 +103,49 @@ class EnrichmentService:
             conn.commit()
         return cleaned
 
-    def compter_a_enrichir(self, database_path):
+    @classmethod
+    def _valider_mode(cls, mode):
+        mode = str(mode or cls.MODE_PENDING).strip().lower()
+        if mode not in cls.VALID_MODES:
+            raise ValueError(f"Mode d'enrichissement invalide : {mode}")
+        return mode
+
+    def compter_cible(self, database_path, *, mode=MODE_PENDING, prospect_ids=None):
+        mode = self._valider_mode(mode)
         conn = connect_database(database_path)
         self._ensure_social_columns(conn)
         try:
             cur = conn.cursor()
-            cur.execute(
-                """
+            query = """
                 SELECT COUNT(*)
                 FROM prospects
-                WHERE COALESCE(TRIM(statut_enrichissement),'')
-                      NOT IN (?, ?)
-                  AND COALESCE(TRIM(entreprise),'') != ''
-                """,
-                (
-                    self.ENRICHED_STATUS,
-                    self.NO_RELIABLE_RESULT_STATUS,
-                ),
-            )
+                WHERE COALESCE(TRIM(entreprise),'') != ''
+            """
+            params = []
+
+            if mode == self.MODE_PENDING:
+                query += """
+                    AND COALESCE(TRIM(statut_enrichissement),'')
+                        NOT IN (?, ?)
+                """
+                params.extend(
+                    [self.ENRICHED_STATUS, self.NO_RELIABLE_RESULT_STATUS]
+                )
+            elif mode == self.MODE_SELECTED:
+                ids = self._normaliser_ids(prospect_ids)
+                if not ids:
+                    return 0
+                placeholders = ",".join("?" for _ in ids)
+                query += f" AND id IN ({placeholders})"
+                params.extend(ids)
+
+            cur.execute(query, params)
             return int(cur.fetchone()[0])
         finally:
             conn.close()
+
+    def compter_a_enrichir(self, database_path):
+        return self.compter_cible(database_path, mode=self.MODE_PENDING)
 
     def compter_sans_resultat(self, database_path):
         conn = connect_database(database_path)
@@ -137,7 +189,15 @@ class EnrichmentService:
         finally:
             conn.close()
 
-    def _charger_prospects(self, conn, limite=None):
+    def _charger_prospects(
+        self,
+        conn,
+        limite=None,
+        *,
+        mode=MODE_PENDING,
+        prospect_ids=None,
+    ):
+        mode = self._valider_mode(mode)
         cur = conn.cursor()
         query = """
             SELECT
@@ -151,15 +211,27 @@ class EnrichmentService:
                 code_naf,
                 noms_recherche
             FROM prospects
-            WHERE COALESCE(TRIM(statut_enrichissement),'')
-                  NOT IN (?, ?)
-              AND COALESCE(TRIM(entreprise),'') != ''
-            ORDER BY id ASC
+            WHERE COALESCE(TRIM(entreprise),'') != ''
         """
-        params = [
-            self.ENRICHED_STATUS,
-            self.NO_RELIABLE_RESULT_STATUS,
-        ]
+        params = []
+
+        if mode == self.MODE_PENDING:
+            query += """
+                AND COALESCE(TRIM(statut_enrichissement),'')
+                    NOT IN (?, ?)
+            """
+            params.extend(
+                [self.ENRICHED_STATUS, self.NO_RELIABLE_RESULT_STATUS]
+            )
+        elif mode == self.MODE_SELECTED:
+            ids = self._normaliser_ids(prospect_ids)
+            if not ids:
+                return []
+            placeholders = ",".join("?" for _ in ids)
+            query += f" AND id IN ({placeholders})"
+            params.extend(ids)
+
+        query += " ORDER BY id ASC"
 
         if limite is not None:
             limite = int(limite)
@@ -256,6 +328,36 @@ class EnrichmentService:
             }
             groups.setdefault(siren, []).append(member)
         return groups
+
+    @staticmethod
+    def _neutraliser_contacts_cibles_siren(groups, prospect_ids):
+        """Retire du contexte les anciennes coordonnées des cibles retraitées.
+
+        Les noms et implantations restent disponibles pour l'identification,
+        mais une ancienne coordonnée d'un prospect ciblé ne peut pas revenir
+        par mutualisation SIREN pendant le même réenrichissement.
+        """
+        target_ids = set(prospect_ids or [])
+        if not target_ids:
+            return
+        contact_keys = (
+            "telephone",
+            "mobile",
+            "site_web",
+            "email",
+            "facebook",
+            "linkedin",
+            "instagram",
+            "twitter",
+            "youtube",
+            "social_other_urls",
+        )
+        for members in groups.values():
+            for member in members:
+                if member.get("id") not in target_ids:
+                    continue
+                for key in contact_keys:
+                    member[key] = ""
 
     def _identity_avec_contexte_siren(self, identity, prospect_id, groups):
         """Ajoute les noms/adresses des autres établissements du même SIREN."""
@@ -625,6 +727,132 @@ class EnrichmentService:
             ]
         )
 
+    @staticmethod
+    def _vider_coordonnees_enrichissement(cur, prospect_id):
+        cur.execute(
+            """
+            UPDATE prospects
+            SET telephone = '',
+                mobile = '',
+                site_web = '',
+                email = '',
+                facebook = '',
+                linkedin = '',
+                instagram = '',
+                twitter = '',
+                youtube = '',
+                social_other_urls = ''
+            WHERE id = ?
+            """,
+            (prospect_id,),
+        )
+
+    @staticmethod
+    def _enregistrer_coordonnees(
+        cur,
+        prospect_id,
+        *,
+        telephone,
+        mobile,
+        site_web,
+        email,
+        reseaux,
+        statut,
+        remplacer,
+    ):
+        other_urls = "\n".join(reseaux.get("other_urls") or [])
+
+        if remplacer:
+            cur.execute(
+                """
+                UPDATE prospects
+                SET telephone = ?,
+                    mobile = ?,
+                    site_web = ?,
+                    email = ?,
+                    facebook = ?,
+                    linkedin = ?,
+                    instagram = ?,
+                    twitter = ?,
+                    youtube = ?,
+                    social_other_urls = ?,
+                    statut_enrichissement = ?,
+                    date_collecte = ?
+                WHERE id = ?
+                """,
+                (
+                    telephone,
+                    mobile,
+                    site_web,
+                    email,
+                    reseaux.get("facebook", ""),
+                    reseaux.get("linkedin", ""),
+                    reseaux.get("instagram", ""),
+                    reseaux.get("twitter", ""),
+                    reseaux.get("youtube", ""),
+                    other_urls,
+                    statut,
+                    str(date.today()),
+                    prospect_id,
+                ),
+            )
+            return
+
+        cur.execute(
+            """
+            UPDATE prospects
+            SET
+                telephone = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE telephone END,
+                mobile = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE mobile END,
+                site_web = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE site_web END,
+                email = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE email END,
+                facebook = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE facebook END,
+                linkedin = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE linkedin END,
+                instagram = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE instagram END,
+                twitter = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE twitter END,
+                youtube = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE youtube END,
+                social_other_urls = CASE WHEN COALESCE(TRIM(?),'') != ''
+                    THEN ? ELSE social_other_urls END,
+                statut_enrichissement = ?,
+                date_collecte = ?
+            WHERE id = ?
+            """,
+            (
+                telephone,
+                telephone,
+                mobile,
+                mobile,
+                site_web,
+                site_web,
+                email,
+                email,
+                reseaux.get("facebook", ""),
+                reseaux.get("facebook", ""),
+                reseaux.get("linkedin", ""),
+                reseaux.get("linkedin", ""),
+                reseaux.get("instagram", ""),
+                reseaux.get("instagram", ""),
+                reseaux.get("twitter", ""),
+                reseaux.get("twitter", ""),
+                reseaux.get("youtube", ""),
+                reseaux.get("youtube", ""),
+                other_urls,
+                other_urls,
+                statut,
+                str(date.today()),
+                prospect_id,
+            ),
+        )
+
     def enrichir(
         self,
         database_path,
@@ -632,6 +860,8 @@ class EnrichmentService:
         progress_callback=None,
         should_stop=None,
         wait_if_paused=None,
+        mode=MODE_PENDING,
+        prospect_ids=None,
     ):
         """Entrée synchrone conservée pour le Worker Qt."""
         return asyncio.run(
@@ -641,6 +871,8 @@ class EnrichmentService:
                 progress_callback=progress_callback,
                 should_stop=should_stop,
                 wait_if_paused=wait_if_paused,
+                mode=mode,
+                prospect_ids=prospect_ids,
             )
         )
 
@@ -651,12 +883,28 @@ class EnrichmentService:
         progress_callback=None,
         should_stop=None,
         wait_if_paused=None,
+        mode=MODE_PENDING,
+        prospect_ids=None,
     ):
+        mode = self._valider_mode(mode)
+        remplacer = mode in {self.MODE_SELECTED, self.MODE_ALL}
+
         conn = connect_database(database_path)
         self._ensure_social_columns(conn)
-        self._sanitize_existing_contacts(conn)
+        prospects = self._charger_prospects(
+            conn,
+            limite,
+            mode=mode,
+            prospect_ids=prospect_ids,
+        )
+        target_ids = [row[0] for row in prospects]
+        self._sanitize_existing_contacts(
+            conn,
+            prospect_ids=target_ids if mode == self.MODE_SELECTED else None,
+        )
         siren_groups = self._charger_contexte_siren(conn)
-        prospects = self._charger_prospects(conn, limite)
+        if remplacer:
+            self._neutraliser_contacts_cibles_siren(siren_groups, target_ids)
         total = len(prospects)
         started_at = time.monotonic()
         api_stats_start = self.entreprise_api.stats()
@@ -878,6 +1126,10 @@ class EnrichmentService:
                         # déjà des coordonnées, elles restent exploitables même
                         # lorsque les recherches web du SIRET courant échouent.
                         if not has_siren_contacts:
+                            if remplacer:
+                                self._vider_coordonnees_enrichissement(
+                                    cur, prospect_id
+                                )
                             cur.execute(
                                 """
                                 UPDATE prospects
@@ -979,6 +1231,10 @@ class EnrichmentService:
                         email,
                         reseaux,
                     ):
+                        if remplacer:
+                            self._vider_coordonnees_enrichissement(
+                                cur, prospect_id
+                            )
                         cur.execute(
                             """
                             UPDATE prospects
@@ -1001,60 +1257,16 @@ class EnrichmentService:
                         )
                         continue
 
-                    other_urls = "\n".join(reseaux.get("other_urls") or [])
-                    cur.execute(
-                        """
-                        UPDATE prospects
-                        SET
-                            telephone = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE telephone END,
-                            mobile = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE mobile END,
-                            site_web = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE site_web END,
-                            email = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE email END,
-                            facebook = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE facebook END,
-                            linkedin = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE linkedin END,
-                            instagram = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE instagram END,
-                            twitter = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE twitter END,
-                            youtube = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE youtube END,
-                            social_other_urls = CASE WHEN COALESCE(TRIM(?),'') != ''
-                                THEN ? ELSE social_other_urls END,
-                            statut_enrichissement = ?,
-                            date_collecte = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            telephone,
-                            telephone,
-                            mobile,
-                            mobile,
-                            site_web,
-                            site_web,
-                            email,
-                            email,
-                            reseaux.get("facebook", ""),
-                            reseaux.get("facebook", ""),
-                            reseaux.get("linkedin", ""),
-                            reseaux.get("linkedin", ""),
-                            reseaux.get("instagram", ""),
-                            reseaux.get("instagram", ""),
-                            reseaux.get("twitter", ""),
-                            reseaux.get("twitter", ""),
-                            reseaux.get("youtube", ""),
-                            reseaux.get("youtube", ""),
-                            other_urls,
-                            other_urls,
-                            self.ENRICHED_STATUS,
-                            str(date.today()),
-                            prospect_id,
-                        ),
+                    self._enregistrer_coordonnees(
+                        cur,
+                        prospect_id,
+                        telephone=telephone,
+                        mobile=mobile,
+                        site_web=site_web,
+                        email=email,
+                        reseaux=reseaux,
+                        statut=self.ENRICHED_STATUS,
+                        remplacer=remplacer,
                     )
 
                     ScoringService.score_prospect_with_connection(conn, prospect_id)

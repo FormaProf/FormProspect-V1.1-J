@@ -14,10 +14,19 @@ class EnrichmentWorker(QObject):
     failed = Signal(str)
     paused_changed = Signal(bool)
 
-    def __init__(self, database_path, limite=None):
+    def __init__(
+        self,
+        database_path,
+        limite=None,
+        *,
+        mode=EnrichmentService.MODE_PENDING,
+        prospect_ids=None,
+    ):
         super().__init__()
         self.database_path = database_path
         self.limite = limite
+        self.mode = mode
+        self.prospect_ids = list(prospect_ids or [])
         self._stop_event = threading.Event()
         self._pause_condition = threading.Condition()
         self._paused = False
@@ -53,6 +62,8 @@ class EnrichmentWorker(QObject):
                     progress_callback=self.progress.emit,
                     should_stop=self._stop_event.is_set,
                     wait_if_paused=self._wait_if_paused,
+                    mode=self.mode,
+                    prospect_ids=self.prospect_ids,
                 )
             except Exception as exc:
                 error_holder["message"] = str(exc)

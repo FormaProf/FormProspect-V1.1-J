@@ -148,7 +148,10 @@ class TreatmentPage(QWidget):
         header_text = QVBoxLayout()
         header_title = QLabel("Moteur d'enrichissement")
         header_title.setStyleSheet(f"font-size: 19px; font-weight: 900; color: {TEXT_PRIMARY};")
-        header_subtitle = QLabel("Traitement reprenable, pilotable et enregistré prospect par prospect.")
+        header_subtitle = QLabel(
+            "Enrichissez les non enrichis ou réenrichissez toute la base. "
+            "Pour des fiches précises, utilisez la sélection dans Prospects."
+        )
         header_subtitle.setStyleSheet(f"font-size: 13px; color: {TEXT_SECONDARY};")
         header_text.addWidget(header_title)
         header_text.addWidget(header_subtitle)
@@ -157,40 +160,69 @@ class TreatmentPage(QWidget):
         control_header.addWidget(self.badge_state, 0, Qt.AlignTop)
         control_card.content_layout.addLayout(control_header)
 
-        action_layout = QHBoxLayout()
-        action_layout.setSpacing(10)
-        self.bouton_test = QPushButton(f"🧪 Tester sur {self.TEST_LIMIT} prospects")
-        self.bouton_enrichir = QPushButton("🚀 Enrichir tous les prospects restants")
+        enrichment_actions = QHBoxLayout()
+        enrichment_actions.setSpacing(10)
+        self.bouton_test = QPushButton(
+            f"🧪 Tester sur {self.TEST_LIMIT} non enrichis"
+        )
+        self.bouton_enrichir = QPushButton("🚀 Enrichir les non enrichis")
+        self.bouton_reenrichir_tout = QPushButton("♻ Réenrichir toute la base")
+        for button in (
+            self.bouton_test,
+            self.bouton_enrichir,
+            self.bouton_reenrichir_tout,
+        ):
+            button.setFixedHeight(46)
+            button.setStyleSheet(primary_button_style())
+
+        self.bouton_test.clicked.connect(
+            lambda: self.demarrer_enrichissement(
+                self.TEST_LIMIT,
+                mode=EnrichmentService.MODE_PENDING,
+            )
+        )
+        self.bouton_enrichir.clicked.connect(
+            lambda: self.demarrer_enrichissement(
+                None,
+                mode=EnrichmentService.MODE_PENDING,
+            )
+        )
+        self.bouton_reenrichir_tout.clicked.connect(
+            lambda: self.demarrer_enrichissement(
+                None,
+                mode=EnrichmentService.MODE_ALL,
+            )
+        )
+        enrichment_actions.addWidget(self.bouton_test)
+        enrichment_actions.addWidget(self.bouton_enrichir, 1)
+        enrichment_actions.addWidget(self.bouton_reenrichir_tout, 1)
+        control_card.content_layout.addLayout(enrichment_actions)
+
+        runtime_actions = QHBoxLayout()
+        runtime_actions.setSpacing(10)
         self.bouton_reessayer = QPushButton("↻ Retenter les sans résultat")
         self.bouton_pause = QPushButton("⏸ Pause")
         self.bouton_arreter = QPushButton("⏹ Arrêter")
         for button in (
-            self.bouton_test,
-            self.bouton_enrichir,
             self.bouton_reessayer,
             self.bouton_pause,
             self.bouton_arreter,
         ):
-            button.setFixedHeight(46)
-        self.bouton_test.setStyleSheet(primary_button_style())
-        self.bouton_enrichir.setStyleSheet(primary_button_style())
+            button.setFixedHeight(42)
         self.bouton_reessayer.setStyleSheet(warning_button_style())
         self.bouton_pause.setStyleSheet(warning_button_style())
         self.bouton_arreter.setStyleSheet(danger_button_style())
         self.bouton_reessayer.setEnabled(False)
         self.bouton_pause.setEnabled(False)
         self.bouton_arreter.setEnabled(False)
-        self.bouton_test.clicked.connect(lambda: self.demarrer_enrichissement(self.TEST_LIMIT))
-        self.bouton_enrichir.clicked.connect(lambda: self.demarrer_enrichissement(None))
         self.bouton_reessayer.clicked.connect(self.reinitialiser_sans_resultat)
         self.bouton_pause.clicked.connect(self.basculer_pause)
         self.bouton_arreter.clicked.connect(self.demander_arret)
-        action_layout.addWidget(self.bouton_test)
-        action_layout.addWidget(self.bouton_enrichir, 1)
-        action_layout.addWidget(self.bouton_reessayer)
-        action_layout.addWidget(self.bouton_pause)
-        action_layout.addWidget(self.bouton_arreter)
-        control_card.content_layout.addLayout(action_layout)
+        runtime_actions.addWidget(self.bouton_reessayer)
+        runtime_actions.addStretch()
+        runtime_actions.addWidget(self.bouton_pause)
+        runtime_actions.addWidget(self.bouton_arreter)
+        control_card.content_layout.addLayout(runtime_actions)
 
         self.progression = QProgressBar()
         self.progression.setRange(0, 100)
@@ -319,6 +351,7 @@ class TreatmentPage(QWidget):
             self.bouton_aliases.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
+            self.bouton_reenrichir_tout.setEnabled(False)
             self.bouton_reessayer.setEnabled(False)
             return
 
@@ -342,6 +375,7 @@ class TreatmentPage(QWidget):
             self.bouton_aliases.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
+            self.bouton_reenrichir_tout.setEnabled(False)
             self.bouton_reessayer.setEnabled(False)
             return
 
@@ -356,20 +390,27 @@ class TreatmentPage(QWidget):
             self.bouton_aliases.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
+            self.bouton_reenrichir_tout.setEnabled(False)
             self.bouton_reessayer.setEnabled(False)
             return
 
         remaining = self.enrichment_service.compter_a_enrichir(project.database)
+        total_reenrichissable = self.enrichment_service.compter_cible(
+            project.database,
+            mode=EnrichmentService.MODE_ALL,
+        )
         without_result = self.enrichment_service.compter_sans_resultat(project.database)
         self.label_projet.setText(f"Projet actif : {project.name}")
         self.label_details.setText(
-            f"{remaining} prospect(s) restant(s) à enrichir | "
-            f"{without_result} sans résultat retraitable(s)."
+            f"{remaining} non enrichi(s) | "
+            f"{total_reenrichissable} prospect(s) au total | "
+            f"{without_result} sans résultat."
         )
         self.bouton_importer.setEnabled(True)
         self.bouton_aliases.setEnabled(bool(self.fichier_excel))
         self.bouton_test.setEnabled(remaining > 0)
         self.bouton_enrichir.setEnabled(remaining > 0)
+        self.bouton_reenrichir_tout.setEnabled(total_reenrichissable > 0)
         self.bouton_reessayer.setEnabled(without_result > 0)
 
     def choisir_excel(self):
@@ -551,6 +592,7 @@ class TreatmentPage(QWidget):
             self.bouton_aliases,
             self.bouton_test,
             self.bouton_enrichir,
+            self.bouton_reenrichir_tout,
             self.bouton_reessayer,
         ):
             button.setEnabled(not running)
@@ -573,29 +615,72 @@ class TreatmentPage(QWidget):
             card.set_value("0")
         self.journal.clear()
 
-    def demarrer_enrichissement(self, limite=None):
+    def demarrer_enrichissement(
+        self,
+        limite=None,
+        *,
+        mode=EnrichmentService.MODE_PENDING,
+    ):
         if self.enrichment_running:
             return
         if not ApplicationState.has_project():
             QMessageBox.warning(self, "Attention", "Aucun projet actif.")
             return
 
-        project = ApplicationState.get_project()
-        remaining = self.enrichment_service.compter_a_enrichir(project.database)
-        if remaining == 0:
-            NotificationManager.info(
-                "Enrichissement terminé",
-                "Tous les prospects du projet ont déjà été enrichis.",
+        context = self.datasource_resolver.resolve()
+        if context.is_cloud:
+            QMessageBox.warning(
+                self,
+                "Projet Cloud",
+                "L'enrichissement doit être réalisé sur le projet local.",
             )
             return
 
-        total_expected = min(remaining, limite) if limite is not None else remaining
-        if limite is None:
+        project = context.project or ApplicationState.get_project()
+        total_cible = self.enrichment_service.compter_cible(
+            project.database,
+            mode=mode,
+        )
+        if total_cible == 0:
+            message = (
+                "Aucun prospect non enrichi n'est disponible."
+                if mode == EnrichmentService.MODE_PENDING
+                else "Aucun prospect n'est disponible dans ce projet."
+            )
+            NotificationManager.info("Enrichissement", message)
+            return
+
+        total_expected = (
+            min(total_cible, limite)
+            if limite is not None
+            else total_cible
+        )
+
+        if mode == EnrichmentService.MODE_ALL:
             answer = QMessageBox.question(
                 self,
-                "Enrichissement complet",
-                f"Vous allez lancer l'enrichissement de {remaining} prospect(s).\n\n"
-                "Le traitement peut durer plusieurs heures. Il pourra être mis en pause ou arrêté.\n\n"
+                "Réenrichir toute la base",
+                f"Vous allez réenrichir {total_cible} prospect(s).\n\n"
+                "Les coordonnées issues de l'enrichissement (téléphones, "
+                "site, email et réseaux sociaux) seront recalculées. Une "
+                "ancienne valeur peut donc être remplacée ou supprimée si "
+                "elle n'est plus retrouvée de façon fiable.\n\n"
+                "En cas d'erreur technique, les anciennes coordonnées sont "
+                "conservées.\n\n"
+                "Voulez-vous continuer ?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+        elif limite is None:
+            answer = QMessageBox.question(
+                self,
+                "Enrichir les prospects non enrichis",
+                f"Vous allez lancer l'enrichissement de {total_cible} "
+                "prospect(s).\n\n"
+                "Le traitement peut durer plusieurs heures. Il pourra être "
+                "mis en pause ou arrêté.\n\n"
                 "Voulez-vous continuer ?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
@@ -608,7 +693,11 @@ class TreatmentPage(QWidget):
 
         self._reset_dashboard(total_expected)
         self.enrichment_thread = QThread(self)
-        self.enrichment_worker = EnrichmentWorker(str(project.database), limite)
+        self.enrichment_worker = EnrichmentWorker(
+            str(project.database),
+            limite,
+            mode=mode,
+        )
         self.enrichment_worker.moveToThread(self.enrichment_thread)
         self.enrichment_thread.started.connect(self.enrichment_worker.run)
         self.enrichment_worker.progress.connect(self.on_progress)
@@ -620,8 +709,21 @@ class TreatmentPage(QWidget):
         self.enrichment_thread.finished.connect(self._cleanup_thread)
 
         self._set_enrichment_running(True)
-        ActivityService.record("Enrichissement démarré", f"Traitement prévu sur {total_expected} prospect(s).", category="enrichment", level="info", metadata={"total": total_expected})
-        self.log(f"🚀 Démarrage de l'enrichissement sur {total_expected} prospect(s).")
+        mode_label = (
+            "réenrichissement complet"
+            if mode == EnrichmentService.MODE_ALL
+            else "enrichissement des non enrichis"
+        )
+        ActivityService.record(
+            "Enrichissement démarré",
+            f"{mode_label} prévu sur {total_expected} prospect(s).",
+            category="enrichment",
+            level="info",
+            metadata={"total": total_expected, "mode": mode},
+        )
+        self.log(
+            f"🚀 Démarrage : {mode_label} sur {total_expected} prospect(s)."
+        )
         self.enrichment_thread.start()
 
     def on_progress(self, stats):

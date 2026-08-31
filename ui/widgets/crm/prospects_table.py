@@ -230,7 +230,7 @@ class ProspectsTableWidget(QTableWidget):
         self.setShowGrid(False)
         self.setWordWrap(False)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setFocusPolicy(Qt.StrongFocus)
 
@@ -445,6 +445,25 @@ class ProspectsTableWidget(QTableWidget):
         if item_id is None:
             return None
         return item_id.data(Qt.UserRole)
+
+    def selected_prospect_ids(self):
+        """Retourne les identifiants uniques des lignes sélectionnées."""
+        selection_model = self.selectionModel()
+        if selection_model is None:
+            return []
+
+        prospect_ids = []
+        seen = set()
+        for index in selection_model.selectedRows(0):
+            prospect_id = self.prospect_id_from_row(index.row())
+            if prospect_id is None:
+                continue
+            key = str(prospect_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            prospect_ids.append(prospect_id)
+        return prospect_ids
 
     def _handle_double_click(self, row, column):
         prospect_id = self.prospect_id_from_row(row)
