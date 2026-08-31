@@ -71,18 +71,61 @@ def priority_to_ui(value: str) -> str:
 
 
 def parse_datetime(value: str | None) -> str | None:
+    """
+    Convertit une date saisie dans Form@Prospect en datetime ISO.
+
+    Les dates sans fuseau horaire sont considérées comme des heures locales
+    du poste utilisateur.
+
+    Exemples en France :
+    - 2026-09-22 20:00 -> 2026-09-22T20:00:00+02:00
+    - 2026-01-22 20:00 -> 2026-01-22T20:00:00+01:00
+
+    Une datetime qui contient déjà un fuseau horaire est conservée telle quelle.
+    """
     text = str(value or "").strip()
+
     if not text:
         return None
-    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+
+    # Formats issus de la saisie Form@Prospect.
+    # Ils ne contiennent pas de timezone : on considère donc
+    # qu'il s'agit de l'heure locale du poste utilisateur.
+    for fmt in (
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
         try:
-            return datetime.strptime(text, fmt).isoformat()
+            parsed = datetime.strptime(text, fmt)
+
+            # Ajoute automatiquement le fuseau local correspondant
+            # à la date concernée (heure été / heure hiver).
+            return parsed.astimezone().isoformat()
+
         except ValueError:
             pass
+
+    # Accepte également les valeurs ISO déjà existantes,
+    # notamment celles provenant du Cloud.
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
+        parsed = datetime.fromisoformat(
+            text.replace("Z", "+00:00")
+        )
+
+        # Une ISO sans timezone doit également être interprétée
+        # comme une heure locale.
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()
+
+        return parsed.isoformat()
+
     except ValueError:
-        raise ValueError("La date doit respecter le format JJ/MM/AAAA ou AAAA-MM-JJ.")
+        raise ValueError(
+            "La date doit respecter le format "
+            "JJ/MM/AAAA ou AAAA-MM-JJ."
+        )
 
 
 def display_datetime(value: str | None) -> str:
