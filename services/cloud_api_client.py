@@ -795,7 +795,6 @@ class CloudAPIClient:
             )
         return payload
 
-
     def get_my_cloud_trainer_session(self, session_id: str) -> dict[str, Any]:
         session_id = str(session_id or "").strip()
         if not session_id:
@@ -820,6 +819,103 @@ class CloudAPIClient:
                 "Form@Prospect Cloud a retourné une liste d'apprenants invalide."
             )
         return payload
+
+    # ------------------------------------------------------------------
+    # Learners
+    # ------------------------------------------------------------------
+
+    def list_cloud_learners(
+        self,
+        *,
+        include_inactive: bool = False,
+        company_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {"include_inactive": str(include_inactive).lower()}
+        normalized_company = str(company_name or "").strip()
+        if normalized_company:
+            params["company_name"] = normalized_company
+        payload = self.get_json(
+            "/learners",
+            params=params,
+        )
+        if not isinstance(payload, list):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné un annuaire d'apprenants invalide."
+            )
+        return payload
+
+    def create_cloud_learner(self, payload: dict) -> dict[str, Any]:
+        result = self.post_json("/learners", payload, expected=(201,))
+        if not isinstance(result, dict):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une fiche apprenant invalide."
+            )
+        return result
+
+    def update_cloud_learner(
+        self,
+        learner_id: str,
+        payload: dict,
+    ) -> dict[str, Any]:
+        learner_id = str(learner_id or "").strip()
+        if not learner_id:
+            raise CloudAPIError("Identifiant apprenant manquant.")
+        result = self.patch_json(f"/learners/{learner_id}", payload)
+        if not isinstance(result, dict):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une fiche apprenant invalide."
+            )
+        return result
+
+    def list_cloud_session_learners(
+        self,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            raise CloudAPIError("Identifiant de session manquant.")
+        payload = self.get_json(f"/learners/sessions/{session_id}/members")
+        if not isinstance(payload, list):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une liste de participants invalide."
+            )
+        return payload
+
+    def add_cloud_session_learner(
+        self,
+        session_id: str,
+        learner_id: str,
+    ) -> dict[str, Any]:
+        session_id = str(session_id or "").strip()
+        learner_id = str(learner_id or "").strip()
+        if not session_id or not learner_id:
+            raise CloudAPIError("Session ou apprenant manquant.")
+        result = self.post_json(
+            f"/learners/sessions/{session_id}/members",
+            {"learner_id": learner_id},
+            expected=(201,),
+        )
+        if not isinstance(result, dict):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné un rattachement apprenant invalide."
+            )
+        return result
+
+    def remove_cloud_session_learner(
+        self,
+        session_id: str,
+        learner_id: str,
+    ) -> None:
+        session_id = str(session_id or "").strip()
+        learner_id = str(learner_id or "").strip()
+        if not session_id or not learner_id:
+            raise CloudAPIError("Session ou apprenant manquant.")
+        self.request(
+            "DELETE",
+            f"/learners/sessions/{session_id}/members/{learner_id}",
+            expected=(204,),
+        )
+
 
     def list_document_trainings(
         self,
@@ -945,6 +1041,35 @@ class CloudAPIClient:
             )
         return payload
 
+    def get_cloud_document_quota(self) -> dict[str, Any]:
+        payload = self.get_json("/documents/quota")
+        if not isinstance(payload, dict) or "count" not in payload:
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné un quota documentaire invalide."
+            )
+        return payload
+
+    def delete_cloud_documents(
+        self,
+        document_ids: list[str],
+    ) -> dict[str, Any]:
+        cleaned = list(dict.fromkeys(
+            str(document_id).strip()
+            for document_id in document_ids
+            if str(document_id).strip()
+        ))
+        if not cleaned:
+            raise CloudAPIError("Sélectionnez au moins un document à supprimer.")
+        payload = self.post_json(
+            "/documents/delete",
+            {"document_ids": cleaned},
+        )
+        if not isinstance(payload, dict) or "deleted_count" not in payload:
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une suppression invalide."
+            )
+        return payload
+
     def get_cloud_document_download_url(
         self,
         document_id: str,
@@ -1034,6 +1159,60 @@ class CloudAPIClient:
                     index += 1
             self.download_cloud_document(str(item["id"]), target)
             count += 1
+        return root, count
+
+
+    def download_cloud_generated_documents(
+        self,
+        *,
+        documents: list[dict[str, Any]],
+        client_name: str,
+        destination_root: str | Path,
+    ) -> tuple[Path, int]:
+        """Download only the documents returned by the current generation call.
+
+        Unlike ``download_cloud_client_folder``, this method never queries the
+        client's whole document library. It therefore cannot re-download
+        documents from older sessions.
+        """
+        root = Path(destination_root) / self._safe_client_folder_name(client_name)
+        folders = {
+            "Devis": "01 - Devis",
+            "Convention": "02 - Conventions",
+            "Programme": "03 - Programmes",
+            "Convocation": "04 - Convocations",
+            "Facture": "05 - Factures",
+            "Attestation de formation": "06 - Attestations",
+        }
+        for folder in folders.values():
+            (root / folder).mkdir(parents=True, exist_ok=True)
+
+        count = 0
+        seen_ids: set[str] = set()
+        for item in documents or []:
+            document_id = str(item.get("id") or "").strip()
+            if not document_id or document_id in seen_ids:
+                continue
+            seen_ids.add(document_id)
+
+            document_type = str(item.get("document_type") or "")
+            if document_type not in folders:
+                continue
+            if str(item.get("status") or "available") != "available":
+                continue
+
+            filename = str(
+                item.get("original_filename")
+                or item.get("document_number")
+                or "document.docx"
+            ).strip()
+            target = root / folders[document_type] / filename
+
+            # A regeneration of the same logical document should replace the
+            # previous local copy instead of creating _2, _3, ... duplicates.
+            self.download_cloud_document(document_id, target)
+            count += 1
+
         return root, count
 
     def upload_cloud_administrative_document(
@@ -1464,6 +1643,7 @@ class CloudAPIClient:
                 "Form@Prospect Cloud a retourné un paiement de facture de commission invalide."
             )
         return result
+
     # ------------------------------------------------------------------
     # Partner commission statements / partner-issued invoices
     # ------------------------------------------------------------------

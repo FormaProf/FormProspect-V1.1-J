@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -262,6 +265,7 @@ class DocumentsPage(QWidget):
         self.template_rows: list[dict] = []
         self.cloud_prospects: list[dict] = []
         self.cloud_documents: list[dict] = []
+        self.cloud_document_quota: dict = {}
         self.cloud_prospect_names: dict[str, str] = {}
         self.setStyleSheet(f"background:{PAGE_BG};")
         self._build_ui()
@@ -334,6 +338,7 @@ class DocumentsPage(QWidget):
             "padding:0 16px;font-size:12px;font-weight:900;}"
             "QPushButton:hover{background:#247BD0;}"
             "QPushButton:pressed{background:#1D66B2;}"
+            "QPushButton:disabled{background:#DCE3EA;color:#7A8796;border:1px solid #CDD6E0;}"
         )
         self.generate_button.clicked.connect(self.generate_documents)
         header.addWidget(self.generate_button)
@@ -419,9 +424,10 @@ class DocumentsPage(QWidget):
         metrics = QHBoxLayout()
         metrics.setSpacing(12)
         self.cloud_metric_values = {}
+        self.cloud_metric_hints = {}
 
         metric_specs = [
-            ("documents", "Documents", "Fichiers disponibles", "📄"),
+            ("documents", "Documents", "Bibliothèque Cloud / limite", "📄"),
             ("generated", "Générés", "Créés par Form@Prospect", "✦"),
             ("uploaded", "Déposés", "Administration / documents signés", "⬆"),
         ]
@@ -467,8 +473,52 @@ class DocumentsPage(QWidget):
             box.addWidget(hint_label)
             metrics.addWidget(card, 1)
             self.cloud_metric_values[key] = value
+            self.cloud_metric_hints[key] = hint_label
 
         layout.addLayout(metrics)
+
+        # ---- Alerte quota Cloud (visible uniquement lorsque la limite est atteinte)
+        self.cloud_quota_alert = QFrame()
+        self.cloud_quota_alert.setObjectName("CloudQuotaAlert")
+        self.cloud_quota_alert.setStyleSheet(
+            "QFrame#CloudQuotaAlert{"
+            "background:#FFF7ED;"
+            "border:1px solid #FDBA74;"
+            "border-radius:14px;"
+            "}"
+        )
+        quota_alert_layout = QHBoxLayout(self.cloud_quota_alert)
+        quota_alert_layout.setContentsMargins(16, 13, 16, 13)
+        quota_alert_layout.setSpacing(12)
+
+        quota_icon = QLabel("!")
+        quota_icon.setFixedSize(32, 32)
+        quota_icon.setAlignment(Qt.AlignCenter)
+        quota_icon.setStyleSheet(
+            "background:#F97316;color:white;border-radius:16px;"
+            "font-size:16px;font-weight:900;"
+        )
+
+        quota_text_box = QVBoxLayout()
+        quota_text_box.setSpacing(2)
+        self.cloud_quota_alert_title = QLabel("Limite de bibliothèque atteinte")
+        self.cloud_quota_alert_title.setStyleSheet(
+            "color:#9A3412;font-size:12px;font-weight:900;"
+            "background:transparent;border:none;"
+        )
+        self.cloud_quota_alert_text = QLabel("")
+        self.cloud_quota_alert_text.setWordWrap(True)
+        self.cloud_quota_alert_text.setStyleSheet(
+            "color:#B54708;font-size:11px;font-weight:750;"
+            "background:transparent;border:none;"
+        )
+        quota_text_box.addWidget(self.cloud_quota_alert_title)
+        quota_text_box.addWidget(self.cloud_quota_alert_text)
+
+        quota_alert_layout.addWidget(quota_icon, 0, Qt.AlignTop)
+        quota_alert_layout.addLayout(quota_text_box, 1)
+        self.cloud_quota_alert.setVisible(False)
+        layout.addWidget(self.cloud_quota_alert)
 
         # ---- Information
         info = QFrame()
@@ -615,8 +665,9 @@ class DocumentsPage(QWidget):
             "border-radius:9px;padding:0 10px;font-size:10px;font-weight:900;"
         )
 
-        self.cloud_status = QLabel("Double-cliquez sur une ligne pour télécharger")
-        self.cloud_status.setWordWrap(False)
+        self.cloud_status = QLabel("Sélectionnez un document puis choisissez DOCX ou PDF")
+        self.cloud_status.setWordWrap(True)
+        self.cloud_status.setMaximumWidth(620)
         self.cloud_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.cloud_status.setStyleSheet(
             "color:#8A98AA;font-size:9px;font-weight:700;"
@@ -629,9 +680,10 @@ class DocumentsPage(QWidget):
         list_top.addWidget(self.cloud_count_badge)
         documents_layout.addLayout(list_top)
 
-        self.cloud_table = QTableWidget(0, 7)
+        self.cloud_table = QTableWidget(0, 8)
         self.cloud_table.setHorizontalHeaderLabels(
             [
+                "Sélection",
                 "Type",
                 "Numéro",
                 "Prospect / client",
@@ -642,10 +694,44 @@ class DocumentsPage(QWidget):
             ]
         )
         self._style_table(self.cloud_table)
+        self.cloud_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeToContents
+        )
+        self.cloud_table.itemChanged.connect(self._cloud_document_check_changed)
         self.cloud_table.doubleClicked.connect(self._download_cloud_document)
         documents_layout.addWidget(self.cloud_table, 1)
 
         actions = QHBoxLayout()
+        actions.setSpacing(8)
+
+        self.cloud_select_all_button = QPushButton("Tout sélectionner")
+        self.cloud_select_all_button.setMinimumHeight(36)
+        self.cloud_select_all_button.setStyleSheet(SECONDARY_BUTTON)
+        self.cloud_select_all_button.clicked.connect(
+            lambda: self._set_all_cloud_document_checks(True)
+        )
+        actions.addWidget(self.cloud_select_all_button)
+
+        self.cloud_unselect_all_button = QPushButton("Tout désélectionner")
+        self.cloud_unselect_all_button.setMinimumHeight(36)
+        self.cloud_unselect_all_button.setStyleSheet(SECONDARY_BUTTON)
+        self.cloud_unselect_all_button.clicked.connect(
+            lambda: self._set_all_cloud_document_checks(False)
+        )
+        actions.addWidget(self.cloud_unselect_all_button)
+
+        self.cloud_delete_button = QPushButton("Supprimer la sélection")
+        self.cloud_delete_button.setMinimumHeight(36)
+        self.cloud_delete_button.setEnabled(False)
+        self.cloud_delete_button.setStyleSheet(
+            "QPushButton{background:#FFFFFF;color:#B42318;border:1px solid #F3B5AE;"
+            "border-radius:9px;padding:0 14px;font-size:11px;font-weight:900;}"
+            "QPushButton:hover{background:#FFF4F2;border-color:#E58C82;}"
+            "QPushButton:disabled{background:#F8FAFC;color:#AAB4C2;border-color:#E5EAF0;}"
+        )
+        self.cloud_delete_button.clicked.connect(self._delete_selected_cloud_documents)
+        actions.addWidget(self.cloud_delete_button)
+
         actions.addStretch()
         self.cloud_download_button = QPushButton("Télécharger le document")
         self.cloud_download_button.setMinimumHeight(38)
@@ -837,6 +923,13 @@ class DocumentsPage(QWidget):
             or self._has_permission("document:upload_signed_assigned")
         )
 
+    def _can_delete_cloud(self) -> bool:
+        role = self._current_role()
+        return (
+            role in {"admin", "administrateur", "administrator", "manager", "commercial"}
+            or self._has_permission("document:manage")
+        )
+
     def _show_information_state(
         self,
         message: str,
@@ -849,6 +942,12 @@ class DocumentsPage(QWidget):
         self.content.setVisible(False)
         self.cloud_content.setVisible(False)
         self.generate_button.setVisible(allow_generate)
+        self.generate_button.setEnabled(allow_generate)
+        self.generate_button.setText("Générer des documents")
+        if allow_generate:
+            self.generate_button.setToolTip("")
+        if hasattr(self, "cloud_quota_alert"):
+            self.cloud_quota_alert.setVisible(False)
 
     def generate_documents(self):
         if self._is_cloud():
@@ -865,6 +964,27 @@ class DocumentsPage(QWidget):
                     "Documents",
                     "Votre profil n'est pas autorisé à générer des documents.",
                 )
+                return
+            try:
+                quota = CloudRuntime.api().get_cloud_document_quota()
+            except CloudAPIError as exc:
+                QMessageBox.warning(self, "Documents", str(exc))
+                return
+            if quota.get("limited") and not quota.get("can_create", True):
+                count = int(quota.get("count") or 0)
+                limit = int(quota.get("limit") or 100)
+                to_delete = max(1, count - limit + 1)
+                suffix = "document" if to_delete == 1 else "documents"
+                QMessageBox.warning(
+                    self,
+                    "Limite de bibliothèque atteinte",
+                    (
+                        f"Votre bibliothèque contient {count} / {limit} documents.\n\n"
+                        f"Supprimez au moins {to_delete} {suffix} pour pouvoir "
+                        "en générer de nouveaux."
+                    ),
+                )
+                self._load_cloud_documents()
                 return
             initial_prospect_id = self.cloud_prospect_combo.currentData()
             dialog = CloudGenerateDocumentsDialog(
@@ -1030,6 +1150,9 @@ class DocumentsPage(QWidget):
             self.empty.setVisible(False)
             self.content.setVisible(True)
             self.generate_button.setVisible(True)
+            self.generate_button.setEnabled(True)
+            self.generate_button.setText("Générer des documents")
+            self.generate_button.setToolTip("")
             stats = self.service.stats()
             for key in self.kpi_labels:
                 self.kpi_labels[key].setText(str(getattr(stats, key)))
@@ -1060,6 +1183,10 @@ class DocumentsPage(QWidget):
         self.cloud_signed_upload_button.setVisible(can_signed_upload)
         self.cloud_training_button.setVisible(can_upload)
         self.cloud_template_button.setVisible(can_upload)
+        can_delete = self._can_delete_cloud()
+        self.cloud_select_all_button.setVisible(can_delete)
+        self.cloud_unselect_all_button.setVisible(can_delete)
+        self.cloud_delete_button.setVisible(can_delete)
 
         api = CloudRuntime.api()
         selected_id = self.cloud_prospect_combo.currentData()
@@ -1100,17 +1227,25 @@ class DocumentsPage(QWidget):
         if not self._is_cloud() or not CloudRuntime.is_active():
             return
         prospect_id = self.cloud_prospect_combo.currentData()
+        api = CloudRuntime.api()
         try:
-            self.cloud_documents = CloudRuntime.api().list_cloud_documents(
+            self.cloud_document_quota = api.get_cloud_document_quota()
+            self.cloud_documents = api.list_cloud_documents(
                 prospect_id=str(prospect_id) if prospect_id else None,
                 include_history=self.cloud_history_check.isChecked(),
-                include_archived=False,
+                include_archived=self.cloud_history_check.isChecked(),
                 limit=500,
             )
         except CloudAPIError as exc:
             self.cloud_status.setText(f"⛔ {exc}")
             self.cloud_status.setStyleSheet("color:#B42318;")
             self.cloud_table.setRowCount(0)
+            self.cloud_document_quota = {}
+            self.generate_button.setText("Générer des documents")
+            self.generate_button.setEnabled(False)
+            self.cloud_signed_upload_button.setEnabled(False)
+            if hasattr(self, "cloud_quota_alert"):
+                self.cloud_quota_alert.setVisible(False)
             return
 
         generated_count = sum(
@@ -1118,76 +1253,163 @@ class DocumentsPage(QWidget):
             if item.get("origin") == "generated"
         )
         uploaded_count = len(self.cloud_documents) - generated_count
+
+        quota_count = int(self.cloud_document_quota.get("count") or 0)
+        quota_limit = self.cloud_document_quota.get("limit")
+        quota_limited = bool(self.cloud_document_quota.get("limited"))
+        quota_can_create = bool(self.cloud_document_quota.get("can_create", True))
+
+        documents_to_delete = 0
+        if quota_limited and quota_limit and not quota_can_create:
+            # Il faut repasser strictement sous la limite pour créer au moins
+            # un nouveau document : 116/100 => 17 suppressions minimum.
+            documents_to_delete = max(1, quota_count - int(quota_limit) + 1)
+
         if hasattr(self, "cloud_metric_values"):
-            self.cloud_metric_values["documents"].setText(str(len(self.cloud_documents)))
+            documents_value = str(quota_count)
+            if quota_limited and quota_limit:
+                documents_value = f"{quota_count} / {quota_limit}"
+            self.cloud_metric_values["documents"].setText(documents_value)
             self.cloud_metric_values["generated"].setText(str(generated_count))
             self.cloud_metric_values["uploaded"].setText(str(uploaded_count))
 
-        self.cloud_download_button.setEnabled(False)
-        self.cloud_table.clearSelection()
-        self.cloud_table.setRowCount(len(self.cloud_documents))
-        for row_index, document in enumerate(self.cloud_documents):
-            self.cloud_table.setRowHeight(row_index, 44)
-            prospect_name = self.cloud_prospect_names.get(
-                str(document.get("prospect_id") or ""),
-                "Prospect visible",
-            )
-            if document.get("origin") == "generated":
-                origin = "Généré"
-            else:
-                storage_path = str(document.get("storage_path") or "").lower()
-                origin = (
-                    "Document signé déposé"
-                    if "signe" in storage_path
-                    else "Déposé par l'administration"
+            if quota_limited and not quota_can_create:
+                self.cloud_metric_values["documents"].setStyleSheet(
+                    "color:#C2410C;font-size:22px;font-weight:900;"
+                    "background:transparent;border:none;"
                 )
-            created = str(document.get("created_at") or "")
-            if created:
-                created = created.replace("T", " ")[:16]
-            values = [
-                document.get("document_type") or "—",
-                document.get("document_number") or "—",
-                prospect_name,
-                document.get("original_filename") or "—",
-                origin,
-                document.get("version") or 1,
-                created or "—",
-            ]
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
+                if hasattr(self, "cloud_metric_hints"):
+                    suffix = "document" if documents_to_delete == 1 else "documents"
+                    self.cloud_metric_hints["documents"].setText(
+                        f"Limite atteinte • Supprimez {documents_to_delete} {suffix} minimum"
+                    )
+                    self.cloud_metric_hints["documents"].setStyleSheet(
+                        "color:#B54708;font-size:9px;font-weight:800;"
+                        "background:transparent;border:none;"
+                    )
+            else:
+                self.cloud_metric_values["documents"].setStyleSheet(
+                    "color:#0B1220;font-size:22px;font-weight:900;"
+                    "background:transparent;border:none;"
+                )
+                if hasattr(self, "cloud_metric_hints"):
+                    self.cloud_metric_hints["documents"].setText(
+                        "Bibliothèque Cloud / limite"
+                    )
+                    self.cloud_metric_hints["documents"].setStyleSheet(
+                        "color:#8A98AA;font-size:9px;"
+                        "background:transparent;border:none;"
+                    )
 
-                if column == 0:
-                    item.setData(Qt.UserRole, str(document.get("id") or ""))
+        can_generate = self._can_generate_cloud()
+        self.generate_button.setEnabled(can_generate and quota_can_create)
+        if quota_limited and not quota_can_create:
+            self.generate_button.setText(f"Limite atteinte — {quota_count} / {quota_limit}")
+            self.generate_button.setToolTip(
+                "Votre bibliothèque a atteint sa limite. "
+                f"Supprimez au moins {documents_to_delete} document(s) pour réactiver la génération."
+            )
+            if hasattr(self, "cloud_quota_alert"):
+                suffix = "document" if documents_to_delete == 1 else "documents"
+                self.cloud_quota_alert_text.setText(
+                    f"Votre bibliothèque contient {quota_count} / {quota_limit} documents. "
+                    f"Supprimez au moins {documents_to_delete} {suffix} pour pouvoir "
+                    "en générer de nouveaux."
+                )
+                self.cloud_quota_alert.setVisible(True)
+        else:
+            self.generate_button.setText("Générer des documents")
+            self.generate_button.setToolTip("")
+            if hasattr(self, "cloud_quota_alert"):
+                self.cloud_quota_alert.setVisible(False)
+
+        can_signed_upload = self._can_signed_upload()
+        self.cloud_signed_upload_button.setEnabled(
+            can_signed_upload and (quota_can_create or not quota_limited)
+        )
+
+        self.cloud_download_button.setEnabled(False)
+        self.cloud_delete_button.setEnabled(False)
+        self.cloud_table.blockSignals(True)
+        try:
+            self.cloud_table.clearSelection()
+            self.cloud_table.setRowCount(len(self.cloud_documents))
+            for row_index, document in enumerate(self.cloud_documents):
+                self.cloud_table.setRowHeight(row_index, 44)
+
+                check_item = QTableWidgetItem()
+                check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                check_item.setCheckState(Qt.Unchecked)
+                check_item.setTextAlignment(Qt.AlignCenter)
+                check_item.setData(Qt.UserRole, str(document.get("id") or ""))
+                self.cloud_table.setItem(row_index, 0, check_item)
+
+                prospect_name = self.cloud_prospect_names.get(
+                    str(document.get("prospect_id") or ""),
+                    "Prospect visible",
+                )
+                if document.get("origin") == "generated":
+                    origin = "Généré"
+                else:
+                    storage_path = str(document.get("storage_path") or "").lower()
+                    origin = (
+                        "Document signé déposé"
+                        if "signe" in storage_path
+                        else "Déposé par l'administration"
+                    )
+                created = str(document.get("created_at") or "")
+                if created:
+                    created = created.replace("T", " ")[:16]
+                values = [
+                    document.get("document_type") or "—",
+                    document.get("document_number") or "—",
+                    prospect_name,
+                    document.get("original_filename") or "—",
+                    origin,
+                    document.get("version") or 1,
+                    created or "—",
+                ]
+                for value_index, value in enumerate(values):
+                    column = value_index + 1
+                    item = QTableWidgetItem(str(value))
+
+                    if column == 1:
+                        self.cloud_table.setItem(row_index, column, item)
+
+                        type_badge = QLabel(str(value))
+                        type_badge.setAlignment(Qt.AlignCenter)
+                        type_badge.setFixedHeight(26)
+                        type_badge.setStyleSheet(
+                            self._document_type_badge_style(str(value))
+                        )
+                        self.cloud_table.setCellWidget(row_index, column, type_badge)
+                        continue
+
+                    if column == 5:
+                        self.cloud_table.setItem(row_index, column, item)
+
+                        origin_badge = QLabel(str(value))
+                        origin_badge.setAlignment(Qt.AlignCenter)
+                        origin_badge.setFixedHeight(26)
+                        origin_badge.setStyleSheet(
+                            self._document_origin_badge_style(str(value))
+                        )
+                        self.cloud_table.setCellWidget(row_index, column, origin_badge)
+                        continue
+
+                    if column in (2, 6, 7):
+                        item.setTextAlignment(Qt.AlignCenter)
+                    elif column == 3:
+                        font = item.font()
+                        font.setBold(True)
+                        item.setFont(font)
+                    elif column == 4:
+                        full_name = str(value)
+                        item.setToolTip(full_name)
+
                     self.cloud_table.setItem(row_index, column, item)
-
-                    type_badge = QLabel(str(value))
-                    type_badge.setAlignment(Qt.AlignCenter)
-                    type_badge.setFixedHeight(26)
-                    type_badge.setStyleSheet(self._document_type_badge_style(str(value)))
-                    self.cloud_table.setCellWidget(row_index, column, type_badge)
-                    continue
-
-                if column == 4:
-                    self.cloud_table.setItem(row_index, column, item)
-
-                    origin_badge = QLabel(str(value))
-                    origin_badge.setAlignment(Qt.AlignCenter)
-                    origin_badge.setFixedHeight(26)
-                    origin_badge.setStyleSheet(self._document_origin_badge_style(str(value)))
-                    self.cloud_table.setCellWidget(row_index, column, origin_badge)
-                    continue
-
-                if column in (1, 5, 6):
-                    item.setTextAlignment(Qt.AlignCenter)
-                elif column == 2:
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-                elif column == 3:
-                    full_name = str(value)
-                    item.setToolTip(full_name)
-
-                self.cloud_table.setItem(row_index, column, item)
+        finally:
+            self.cloud_table.blockSignals(False)
 
         count = len(self.cloud_documents)
         if hasattr(self, "cloud_count_badge"):
@@ -1195,11 +1417,97 @@ class DocumentsPage(QWidget):
                 f"{count} document" if count == 1 else f"{count} documents"
             )
 
-        self.cloud_status.setText(
-            "Double-cliquez sur une ligne pour télécharger"
+        if quota_limited and not quota_can_create:
+            suffix = "document" if documents_to_delete == 1 else "documents"
+            self.cloud_status.setText(
+                f"⚠ Limite atteinte : {quota_count} / {quota_limit}. "
+                f"Supprimez au moins {documents_to_delete} {suffix}."
+            )
+            self.cloud_status.setStyleSheet(
+                "color:#B54708;font-size:9px;font-weight:800;"
+            )
+        else:
+            self.cloud_status.setText(
+                "Sélectionnez un document puis choisissez DOCX ou PDF"
+            )
+            self.cloud_status.setStyleSheet(
+                "color:#8A98AA;font-size:9px;font-weight:700;"
+            )
+
+    def _checked_cloud_document_ids(self) -> list[str]:
+        selected: list[str] = []
+        for row in range(self.cloud_table.rowCount()):
+            item = self.cloud_table.item(row, 0)
+            if item is not None and item.checkState() == Qt.Checked:
+                document_id = str(item.data(Qt.UserRole) or "").strip()
+                if document_id:
+                    selected.append(document_id)
+        return selected
+
+    def _cloud_document_check_changed(self, _item: QTableWidgetItem) -> None:
+        self.cloud_delete_button.setEnabled(bool(self._checked_cloud_document_ids()))
+
+    def _set_all_cloud_document_checks(self, checked: bool) -> None:
+        state = Qt.Checked if checked else Qt.Unchecked
+        self.cloud_table.blockSignals(True)
+        try:
+            for row in range(self.cloud_table.rowCount()):
+                item = self.cloud_table.item(row, 0)
+                if item is not None:
+                    item.setCheckState(state)
+        finally:
+            self.cloud_table.blockSignals(False)
+        self.cloud_delete_button.setEnabled(bool(self._checked_cloud_document_ids()))
+
+    def _delete_selected_cloud_documents(self) -> None:
+        document_ids = self._checked_cloud_document_ids()
+        if not document_ids:
+            QMessageBox.information(
+                self,
+                "Supprimer des documents",
+                "Cochez au moins un document à supprimer.",
+            )
+            return
+
+        count = len(document_ids)
+        noun = "document" if count == 1 else "documents"
+        answer = QMessageBox.warning(
+            self,
+            "Confirmer la suppression",
+            (
+                f"Supprimer définitivement {count} {noun} ?\n\n"
+                "Cette action supprimera l'enregistrement Cloud ainsi que le fichier "
+                "physique stocké. Elle est irréversible."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        self.cloud_status.setStyleSheet(
-            "color:#8A98AA;font-size:9px;font-weight:700;"
+        if answer != QMessageBox.Yes:
+            return
+
+        self.cloud_delete_button.setEnabled(False)
+        try:
+            result = CloudRuntime.api().delete_cloud_documents(document_ids)
+        except CloudAPIError as exc:
+            QMessageBox.critical(
+                self,
+                "Suppression impossible",
+                str(exc),
+            )
+            self.cloud_delete_button.setEnabled(True)
+            return
+
+        deleted_count = int(result.get("deleted_count") or 0)
+        self._load_cloud_documents()
+        QMessageBox.information(
+            self,
+            "Documents supprimés",
+            (
+                f"{deleted_count} document"
+                if deleted_count == 1
+                else f"{deleted_count} documents"
+            )
+            + " supprimé(s) de la bibliothèque Cloud.",
         )
 
     def _selected_cloud_document(self) -> dict | None:
@@ -1213,27 +1521,125 @@ class DocumentsPage(QWidget):
             return None
         return self.cloud_documents[row]
 
+    @staticmethod
+    def _convert_docx_to_pdf(docx_path: Path, pdf_path: Path) -> Path:
+        """Convertit un DOCX en PDF sans reconstruire sa mise en page."""
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+        libreoffice = shutil.which("libreoffice") or shutil.which("soffice")
+        if libreoffice:
+            try:
+                proc = subprocess.run(
+                    [
+                        libreoffice,
+                        "--headless",
+                        "--convert-to",
+                        "pdf",
+                        "--outdir",
+                        str(pdf_path.parent),
+                        str(docx_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                generated = pdf_path.parent / f"{docx_path.stem}.pdf"
+                if proc.returncode == 0 and generated.exists():
+                    if generated.resolve() != pdf_path.resolve():
+                        shutil.move(str(generated), str(pdf_path))
+                    return pdf_path
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        powershell = shutil.which("powershell") or shutil.which("powershell.exe")
+        if powershell:
+            source = str(docx_path.resolve()).replace("'", "''")
+            target = str(pdf_path.resolve()).replace("'", "''")
+            script = (
+                "$ErrorActionPreference='Stop';"
+                "$w=New-Object -ComObject Word.Application;"
+                "$w.Visible=$false;"
+                "try{"
+                f"$d=$w.Documents.Open('{source}');"
+                f"$d.SaveAs([ref]'{target}',[ref]17);"
+                "$d.Close();"
+                "}finally{$w.Quit();}"
+            )
+            try:
+                proc = subprocess.run(
+                    [powershell, "-NoProfile", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if proc.returncode == 0 and pdf_path.exists():
+                    return pdf_path
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        raise RuntimeError(
+            "La conversion PDF nécessite Microsoft Word ou LibreOffice sur cet ordinateur."
+        )
+
     def _download_cloud_document(self, *_args) -> None:
         document = self._selected_cloud_document()
         if not document:
             return
-        filename = str(document.get("original_filename") or "document")
-        destination, _ = QFileDialog.getSaveFileName(
+
+        original_filename = str(document.get("original_filename") or "document")
+        original_suffix = Path(original_filename).suffix.lower()
+        is_generated_docx = (
+            document.get("origin") == "generated" and original_suffix == ".docx"
+        )
+
+        if is_generated_docx:
+            default_name = original_filename
+            filters = "Document Word (*.docx);;Document PDF (*.pdf)"
+        elif original_suffix == ".pdf":
+            default_name = original_filename
+            filters = "Document PDF (*.pdf)"
+        else:
+            default_name = original_filename
+            filters = "Tous les fichiers (*.*)"
+
+        destination, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Télécharger le document",
-            filename,
-            "Tous les fichiers (*.*)",
+            default_name,
+            filters,
         )
         if not destination:
             return
+
+        target = Path(destination)
+        wants_pdf = is_generated_docx and "PDF" in selected_filter
+        if wants_pdf:
+            if target.suffix.lower() != ".pdf":
+                target = target.with_suffix(".pdf")
+        elif is_generated_docx:
+            if target.suffix.lower() != ".docx":
+                target = target.with_suffix(".docx")
+        elif original_suffix == ".pdf" and target.suffix.lower() != ".pdf":
+            target = target.with_suffix(".pdf")
+
         try:
-            saved = CloudRuntime.api().download_cloud_document(
-                str(document.get("id") or ""),
-                destination,
-            )
-        except CloudAPIError as exc:
+            if wants_pdf:
+                with tempfile.TemporaryDirectory(prefix="formaprospect_pdf_") as temp_dir:
+                    temp_docx = Path(temp_dir) / Path(original_filename).name
+                    CloudRuntime.api().download_cloud_document(
+                        str(document.get("id") or ""),
+                        temp_docx,
+                    )
+                    saved = self._convert_docx_to_pdf(temp_docx, target)
+            else:
+                saved = CloudRuntime.api().download_cloud_document(
+                    str(document.get("id") or ""),
+                    target,
+                )
+        except (CloudAPIError, RuntimeError, OSError) as exc:
             QMessageBox.critical(self, "Téléchargement impossible", str(exc))
             return
+
         answer = QMessageBox.question(
             self,
             "Document téléchargé",

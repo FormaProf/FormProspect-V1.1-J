@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QDate, Qt, QUrl
@@ -43,6 +45,38 @@ from core.premium_theme import (
 )
 from services.cloud_api_client import CloudAPIError
 from services.document_generator_service import DocumentGeneratorService
+from ui.dialogs.learner_dialog import LearnerSelectionDialog
+
+
+class _WheelAfterClickMixin:
+    """Empêche la molette de modifier accidentellement les champs du formulaire.
+
+    La molette reste dédiée au défilement de la fenêtre. Les valeurs se modifient
+    volontairement par clic, clavier, flèches ou calendrier.
+    """
+
+    def wheelEvent(self, event):  # noqa: N802 - signature Qt
+        # Ne jamais consommer la molette sur un champ de saisie : le QScrollArea
+        # parent la récupère et fait défiler le formulaire. Cela évite notamment
+        # qu'une date, un nombre de participants ou une modalité change pendant
+        # un simple scroll.
+        event.ignore()
+
+
+class _FocusWheelComboBox(_WheelAfterClickMixin, QComboBox):
+    pass
+
+
+class _FocusWheelSpinBox(_WheelAfterClickMixin, QSpinBox):
+    pass
+
+
+class _FocusWheelDoubleSpinBox(_WheelAfterClickMixin, QDoubleSpinBox):
+    pass
+
+
+class _FocusWheelDateEdit(_WheelAfterClickMixin, QDateEdit):
+    pass
 
 
 class GenerateDocumentsDialog(QDialog):
@@ -81,7 +115,7 @@ class GenerateDocumentsDialog(QDialog):
         form = QFormLayout(card)
         form.setContentsMargins(18, 16, 18, 16)
         form.setSpacing(12)
-        self.session_combo = QComboBox()
+        self.session_combo = _FocusWheelComboBox()
         self.session_combo.currentIndexChanged.connect(self._refresh_summary)
         form.addRow("Dossier / session", self.session_combo)
         root.addWidget(card)
@@ -98,10 +132,9 @@ class GenerateDocumentsDialog(QDialog):
         for doc_type in self.service.UI_TYPES:
             check = QCheckBox(doc_type)
             check.setChecked(True)
-            check.setEnabled(False)
+            check.toggled.connect(self._refresh_summary)
             check.setToolTip(
-                "Le dossier complet contient automatiquement Convention, "
-                "Programme et Convocation."
+                "Cochez uniquement les documents que vous souhaitez générer."
             )
             self.type_checks[doc_type] = check
             checks.addWidget(check)
@@ -233,6 +266,13 @@ class GenerateDocumentsDialog(QDialog):
             for name, check in self.type_checks.items()
             if check.isChecked()
         ]
+        if not selected:
+            QMessageBox.information(
+                self,
+                "Documents",
+                "Sélectionnez au moins un document à générer.",
+            )
+            return
         preflight = self.service.preflight(int(session_id), selected)
         if preflight.errors:
             QMessageBox.warning(
@@ -310,9 +350,11 @@ class CloudGenerateDocumentsDialog(QDialog):
         self.prospects: list[dict] = []
         self.trainings: list[dict] = []
         self.trainers: list[dict] = []
+        self.selected_learners: list[dict] = []
         self.generated_documents: list[dict] = []
         self.generated_prospect_id: str | None = None
         self.generated_client_name: str = ""
+        self.output_root: Path | None = None
         self.setWindowTitle("Générer les documents Cloud")
         self.resize(900, 800)
         self.setMinimumSize(820, 700)
@@ -515,15 +557,15 @@ class CloudGenerateDocumentsDialog(QDialog):
             "Sélectionnez le bénéficiaire et la formation à rattacher au dossier.",
         )
 
-        self.prospect_combo = QComboBox()
+        self.prospect_combo = _FocusWheelComboBox()
         self.prospect_combo.setStyleSheet(field_style)
         self.prospect_combo.currentIndexChanged.connect(self._refresh_summary)
 
-        self.training_combo = QComboBox()
+        self.training_combo = _FocusWheelComboBox()
         self.training_combo.setStyleSheet(field_style)
         self.training_combo.currentIndexChanged.connect(self._training_changed)
 
-        selection_box.addWidget(field_block("Prospect / client *", self.prospect_combo))
+        selection_box.addWidget(field_block("Client *", self.prospect_combo))
         selection_box.addWidget(field_block("Formation *", self.training_combo))
         content.addWidget(selection_card)
 
@@ -537,16 +579,26 @@ class CloudGenerateDocumentsDialog(QDialog):
         )
 
         planning_grid = QGridLayout()
+        self.planning_card = planning_card
+        self.planning_grid = planning_grid
         planning_grid.setHorizontalSpacing(12)
         planning_grid.setVerticalSpacing(10)
 
-        self.start_date = QDateEdit(QDate.currentDate())
+        self.start_date = _FocusWheelDateEdit(QDate.currentDate())
         self._configure_date_editor(self.start_date)
         self.start_date.setStyleSheet(field_style)
 
-        self.end_date = QDateEdit(QDate.currentDate())
+        self.end_date = _FocusWheelDateEdit(QDate.currentDate())
         self._configure_date_editor(self.end_date)
         self.end_date.setStyleSheet(field_style)
+        # La date de fin est calculée automatiquement à partir de la durée
+        # de la formation et des horaires. On la verrouille pour empêcher
+        # toute incohérence accidentelle (ex. scroll jusqu'en 2030).
+        self.end_date.setReadOnly(True)
+        self.end_date.setButtonSymbols(QSpinBox.NoButtons)
+        self.end_date.setToolTip(
+            "Calculée automatiquement selon la durée de la formation et les horaires."
+        )
 
         self.start_date.dateChanged.connect(self._dates_changed)
         self.end_date.dateChanged.connect(self._refresh_summary)
@@ -572,14 +624,14 @@ class CloudGenerateDocumentsDialog(QDialog):
         )
         planning_grid.addWidget(self.schedule_validation, 2, 0, 1, 2)
 
-        self.modality = QComboBox()
+        self.modality = _FocusWheelComboBox()
         self.modality.addItem("À distance", "distance")
         self.modality.addItem("Présentiel", "presentiel")
         self.modality.addItem("Hybride", "hybride")
         self.modality.setStyleSheet(field_style)
-        self.modality.currentIndexChanged.connect(self._refresh_summary)
+        self.modality.currentIndexChanged.connect(self._modality_changed)
 
-        self.participant_count = QSpinBox()
+        self.participant_count = _FocusWheelSpinBox()
         self.participant_count.setRange(1, 1000)
         self.participant_count.setValue(1)
         self.participant_count.setStyleSheet(field_style)
@@ -591,19 +643,127 @@ class CloudGenerateDocumentsDialog(QDialog):
             3, 1,
         )
 
+        # Champs de lieu/connexion affichés directement sous la modalité.
+        # Ils sont créés ici pour que le changement Présentiel / À distance /
+        # Hybride soit immédiatement visible sans devoir descendre jusqu'à la
+        # section Intervenants.
+        self.location_name = self._field()
+        self.location_name.setStyleSheet(field_style)
+        self.location_name.setPlaceholderText(
+            "Ex. Centre de formation, locaux de l'entreprise…"
+        )
+        self.location_name.textChanged.connect(self._refresh_summary)
+        self.location_name_block = field_block(
+            "Lieu de formation *",
+            self.location_name,
+        )
+
+        self.location_address = self._field()
+        self.location_address.setStyleSheet(field_style)
+        self.location_address.setPlaceholderText(
+            "Adresse complète du lieu de formation"
+        )
+        self.location_address.textChanged.connect(self._refresh_summary)
+        self.location_address_block = field_block(
+            "Adresse du lieu *",
+            self.location_address,
+        )
+
+        self.connection_link = self._field()
+        self.connection_link.setStyleSheet(field_style)
+        self.connection_link.setPlaceholderText("Lien Google Meet")
+        self.connection_link.textChanged.connect(self._refresh_summary)
+        self.connection_link_block = field_block(
+            "Lien de connexion",
+            self.connection_link,
+        )
+
+        planning_grid.addWidget(self.location_name_block, 4, 0)
+        planning_grid.addWidget(self.location_address_block, 4, 1)
+        planning_grid.addWidget(self.connection_link_block, 5, 0, 1, 2)
+
         planning_box.addLayout(planning_grid)
         content.addWidget(planning_card)
 
         # --------------------------------------------------------------
-        # 3. Intervenant & financement
+        # 3. Apprenants
+        # --------------------------------------------------------------
+        learners_card, learners_box = section_card(
+            "03  •  APPRENANTS",
+            "Participants nominatifs",
+            "Ajoutez les personnes réellement inscrites à la session. Le nombre de participants se synchronise automatiquement.",
+        )
+
+        learner_actions = QHBoxLayout()
+        self.add_learner_button = QPushButton("+ Ajouter un apprenant")
+        self.add_learner_button.setMinimumHeight(38)
+        self.add_learner_button.setStyleSheet(
+            "QPushButton{background:#338CE4;color:white;border:none;border-radius:10px;"
+            "padding:0 14px;font-size:10px;font-weight:900;}"
+            "QPushButton:hover{background:#287FD4;}"
+        )
+        self.add_learner_button.clicked.connect(self._add_learners)
+        learner_actions.addWidget(self.add_learner_button)
+
+        self.remove_learner_button = QPushButton("Retirer la sélection")
+        self.remove_learner_button.setMinimumHeight(38)
+        self.remove_learner_button.setEnabled(False)
+        self.remove_learner_button.setStyleSheet(
+            "QPushButton{background:#FFFFFF;color:#334155;border:1px solid #DCE5EF;"
+            "border-radius:10px;padding:0 14px;font-size:10px;font-weight:850;}"
+            "QPushButton:hover{background:#F8FBFF;color:#B42318;border-color:#F3B8B2;}"
+            "QPushButton:disabled{background:#F8FAFC;color:#B6C0CC;}"
+        )
+        self.remove_learner_button.clicked.connect(self._remove_selected_learner)
+        learner_actions.addWidget(self.remove_learner_button)
+        learner_actions.addStretch()
+        learners_box.addLayout(learner_actions)
+
+        self.learners_table = QTableWidget(0, 4)
+        self.learners_table.setHorizontalHeaderLabels(["Apprenant", "Fonction", "E-mail", "Téléphone"])
+        self.learners_table.setMinimumHeight(130)
+        self.learners_table.setMaximumHeight(220)
+        self.learners_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.learners_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.learners_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.learners_table.verticalHeader().setVisible(False)
+        self.learners_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.learners_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.learners_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.learners_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.learners_table.itemSelectionChanged.connect(
+            lambda: self.remove_learner_button.setEnabled(self.learners_table.currentRow() >= 0)
+        )
+        self.learners_table.setStyleSheet(
+            "QTableWidget{background:#FFFFFF;color:#243447;border:1px solid #DCE5EF;"
+            "border-radius:10px;gridline-color:#EDF2F7;}"
+            "QHeaderView::section{background:#F8FBFF;color:#53657C;border:none;"
+            "border-bottom:1px solid #DCE5EF;padding:7px;font-weight:900;}"
+            "QTableWidget::item:selected{background:#EAF4FF;color:#173A5E;}"
+        )
+        learners_box.addWidget(self.learners_table)
+
+        self.learners_hint = QLabel(
+            "Aucun apprenant nominatif ajouté. Le nombre de participants reste saisissable manuellement pour les dossiers historiques."
+        )
+        self.learners_hint.setWordWrap(True)
+        self.learners_hint.setStyleSheet(
+            "color:#64748B;font-size:9px;background:#F8FBFF;border:1px solid #E2ECF7;"
+            "border-radius:9px;padding:8px 10px;"
+        )
+        learners_box.addWidget(self.learners_hint)
+        content.addWidget(learners_card)
+
+        # --------------------------------------------------------------
+        # 4. Intervenant & financement
         # --------------------------------------------------------------
         logistics_card, logistics_box = section_card(
-            "03  •  INTERVENANTS",
+            "04  •  INTERVENANTS",
             "Formateur & financement",
             "Complétez les informations nécessaires aux documents administratifs.",
         )
 
-        self.trainer_combo = QComboBox()
+        self.trainer_combo = _FocusWheelComboBox()
         self.trainer_combo.setStyleSheet(field_style)
         self.trainer_combo.currentIndexChanged.connect(self._trainer_changed)
 
@@ -634,7 +794,7 @@ class CloudGenerateDocumentsDialog(QDialog):
         logistics_grid.setHorizontalSpacing(12)
         logistics_grid.setVerticalSpacing(10)
 
-        self.funder = QComboBox()
+        self.funder = _FocusWheelComboBox()
         for label in ("Entreprise", "FAFCEA", "CONSTRUCTYS", "Autre"):
             self.funder.addItem(label, label)
         self.funder.setStyleSheet(field_style)
@@ -651,27 +811,21 @@ class CloudGenerateDocumentsDialog(QDialog):
             field_block("Détails financeur", self.funder_details),
             0, 1,
         )
-
-        self.connection_link = self._field()
-        self.connection_link.setStyleSheet(field_style)
-        self.connection_link.setPlaceholderText(
-            "Lien Google Meet ou adresse du lieu"
-        )
-        logistics_grid.addWidget(
-            field_block("Connexion / lieu", self.connection_link),
-            1, 0, 1, 2,
-        )
-
+        # IMPORTANT : rattacher le layout à la carte avant de poursuivre.
+        # Sans cela, Qt détruit les widgets Financeur/Détails lorsqu'il collecte
+        # le QGridLayout temporaire, ce qui provoque les erreurs libshiboken.
         logistics_box.addLayout(logistics_grid)
+
+        self._modality_changed()
         content.addWidget(logistics_card)
 
         # --------------------------------------------------------------
-        # 4. Documents
+        # 5. Documents
         # --------------------------------------------------------------
         docs_card, docs_box = section_card(
-            "04  •  DOCUMENTS",
-            "Dossier à générer",
-            "Les trois documents constituent le dossier administratif standard.",
+            "05  •  DOCUMENTS",
+            "Documents à générer",
+            "Choisissez les documents, leur format de sortie et l’emplacement du dossier client.",
         )
 
         checks = QHBoxLayout()
@@ -695,13 +849,59 @@ class CloudGenerateDocumentsDialog(QDialog):
 
         checks.addStretch()
         docs_box.addLayout(checks)
+
+        output_grid = QGridLayout()
+        output_grid.setHorizontalSpacing(12)
+        output_grid.setVerticalSpacing(10)
+
+        self.output_format = _FocusWheelComboBox()
+        self.output_format.addItem("Word (.docx)", "docx")
+        self.output_format.addItem("PDF (.pdf)", "pdf")
+        self.output_format.setStyleSheet(field_style)
+        self.output_format.currentIndexChanged.connect(self._refresh_summary)
+        output_grid.addWidget(field_block("Format de sortie *", self.output_format), 0, 0)
+
+        destination_widget = QWidget()
+        destination_widget.setStyleSheet("background:transparent;")
+        destination_row = QHBoxLayout(destination_widget)
+        destination_row.setContentsMargins(0, 0, 0, 0)
+        destination_row.setSpacing(8)
+
+        self.output_folder = QLineEdit()
+        self.output_folder.setReadOnly(True)
+        self.output_folder.setPlaceholderText("Choisissez le dossier parent")
+        self.output_folder.setStyleSheet(field_style)
+
+        choose_output = QPushButton("Parcourir…")
+        choose_output.setMinimumHeight(40)
+        choose_output.setStyleSheet(
+            "QPushButton{background:#FFFFFF;color:#334155;border:1px solid #DCE5EF;"
+            "border-radius:10px;padding:0 14px;font-size:11px;font-weight:850;}"
+            "QPushButton:hover{background:#F8FBFF;color:#338CE4;border-color:#AFCFF0;}"
+        )
+        choose_output.clicked.connect(self._choose_output_folder)
+        destination_row.addWidget(self.output_folder, 1)
+        destination_row.addWidget(choose_output)
+        output_grid.addWidget(field_block("Emplacement du dossier client *", destination_widget), 0, 1)
+
+        output_hint = QLabel(
+            "Le dossier portant le nom du client sera créé automatiquement dans l’emplacement choisi. "
+            "Seuls les documents cochés seront téléchargés dans le format sélectionné."
+        )
+        output_hint.setWordWrap(True)
+        output_hint.setStyleSheet(
+            "color:#64748B;font-size:9px;background:#F8FBFF;border:1px solid #E2ECF7;"
+            "border-radius:9px;padding:8px 10px;"
+        )
+        output_grid.addWidget(output_hint, 1, 0, 1, 2)
+        docs_box.addLayout(output_grid)
         content.addWidget(docs_card)
 
         # --------------------------------------------------------------
         # 5. Aperçu
         # --------------------------------------------------------------
         summary_card, summary_box = section_card(
-            "05  •  CONTRÔLE",
+            "06  •  CONTRÔLE",
             "Aperçu du dossier",
             "Vérifiez les informations avant de lancer la génération.",
         )
@@ -727,6 +927,7 @@ class CloudGenerateDocumentsDialog(QDialog):
         content.addStretch()
 
         scroll = QScrollArea()
+        self.form_scroll = scroll
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -764,7 +965,7 @@ class CloudGenerateDocumentsDialog(QDialog):
         cancel.clicked.connect(self.reject)
 
         self.generate_button = QPushButton(
-            "Créer la session et générer le dossier complet"
+            "Créer la session, générer et télécharger"
         )
         self.generate_button.setMinimumHeight(40)
         self.generate_button.setStyleSheet(
@@ -781,10 +982,84 @@ class CloudGenerateDocumentsDialog(QDialog):
         footer_layout.addWidget(self.generate_button)
         root.addWidget(footer)
 
+    def _choose_output_folder(self) -> None:
+        destination = QFileDialog.getExistingDirectory(
+            self,
+            "Choisir l’emplacement du dossier client",
+            str(self.output_root or Path.home()),
+        )
+        if not destination:
+            return
+        self.output_root = Path(destination)
+        self.output_folder.setText(str(self.output_root))
+        self._refresh_summary()
+
+    @staticmethod
+    def _convert_docx_to_pdf(docx_path: Path) -> Path:
+        pdf_path = docx_path.with_suffix(".pdf")
+        libreoffice = shutil.which("libreoffice") or shutil.which("soffice")
+        if libreoffice:
+            try:
+                proc = subprocess.run(
+                    [libreoffice, "--headless", "--convert-to", "pdf", "--outdir", str(docx_path.parent), str(docx_path)],
+                    capture_output=True, text=True, timeout=90,
+                )
+                if proc.returncode == 0 and pdf_path.exists():
+                    return pdf_path
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+        powershell = shutil.which("powershell") or shutil.which("pwsh")
+        if powershell:
+            escaped_docx = str(docx_path.resolve()).replace("'", "''")
+            escaped_pdf = str(pdf_path.resolve()).replace("'", "''")
+            script = (
+                "$w=New-Object -ComObject Word.Application; $w.Visible=$false; $w.DisplayAlerts=0; "
+                f"$d=$w.Documents.Open('{escaped_docx}'); "
+                f"$d.SaveAs([ref]'{escaped_pdf}',[ref]17); $d.Close(); $w.Quit();"
+            )
+            try:
+                proc = subprocess.run(
+                    [powershell, "-NoProfile", "-Command", script],
+                    capture_output=True, text=True, timeout=90,
+                )
+                if proc.returncode == 0 and pdf_path.exists():
+                    return pdf_path
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        raise RuntimeError("La conversion PDF nécessite Microsoft Word ou LibreOffice sur ce poste.")
+
+    def _download_generated_selection(self) -> tuple[Path, int]:
+        if not self.output_root:
+            raise RuntimeError("Aucun emplacement de dossier n’a été sélectionné.")
+
+        folder, count = self.api.download_cloud_generated_documents(
+            documents=self.generated_documents,
+            client_name=self.generated_client_name,
+            destination_root=self.output_root,
+        )
+
+        if str(self.output_format.currentData() or "docx") == "pdf":
+            converted = 0
+            errors: list[str] = []
+            for docx_path in Path(folder).rglob("*.docx"):
+                try:
+                    self._convert_docx_to_pdf(docx_path)
+                    docx_path.unlink(missing_ok=True)
+                    converted += 1
+                except Exception as exc:
+                    errors.append(f"{docx_path.name} : {exc}")
+            if errors:
+                raise RuntimeError("Certains PDF n’ont pas pu être créés :\n- " + "\n- ".join(errors))
+            count = converted
+
+        return Path(folder), count
+
     def _load_cloud_data(self) -> None:
         try:
             self.prospects = self.api.list_prospects(
                 include_archived=False,
+                pipeline_stage="gagne",
                 limit=500,
             ).items
             self.trainings = self.api.list_document_trainings(
@@ -802,15 +1077,26 @@ class CloudGenerateDocumentsDialog(QDialog):
         self.prospect_combo.clear()
         selected_index = -1
         for index, prospect in enumerate(self.prospects):
-            company = str(prospect.get("company_name") or "Prospect sans nom")
+            company = str(prospect.get("company_name") or "Client sans nom")
             contact = str(prospect.get("contact_name") or "").strip()
             label = company if not contact else f"{company} — {contact}"
             prospect_id = str(prospect.get("id") or "")
             self.prospect_combo.addItem(label, prospect_id)
             if prospect_id == self.initial_prospect_id:
                 selected_index = index
+
+        initial_client_missing = bool(
+            self.initial_prospect_id and selected_index < 0
+        )
         if selected_index >= 0:
             self.prospect_combo.setCurrentIndex(selected_index)
+        elif initial_client_missing:
+            self.prospect_combo.insertItem(
+                0,
+                "⛔ Ce prospect n'est pas encore client",
+                None,
+            )
+            self.prospect_combo.setCurrentIndex(0)
 
         self.trainer_combo.clear()
         for trainer in self.trainers:
@@ -857,7 +1143,13 @@ class CloudGenerateDocumentsDialog(QDialog):
 
         if not self.prospects:
             self.status_label.setText(
-                "⛔ Aucun prospect visible n'est disponible pour la génération."
+                "⛔ Aucun client finalisé n'est disponible. Transformez d'abord le prospect en client depuis le CRM et complétez sa fiche client."
+            )
+            self.status_label.setStyleSheet("color:#B42318;")
+            self.generate_button.setEnabled(False)
+        elif initial_client_missing:
+            self.status_label.setText(
+                "⛔ Le prospect sélectionné n'est pas encore client. Finalisez sa conversion et sa fiche client dans le CRM avant de créer une session ou de générer les documents."
             )
             self.status_label.setStyleSheet("color:#B42318;")
             self.generate_button.setEnabled(False)
@@ -1048,8 +1340,15 @@ class CloudGenerateDocumentsDialog(QDialog):
                 "Le planning n'a pas pu être ouvert dans le navigateur.",
             )
 
+    @staticmethod
+    def _safe_combo_text(combo, default: str = "") -> str:
+        try:
+            return combo.currentText()
+        except RuntimeError:
+            return default
+
     def _funder_changed(self) -> None:
-        is_company = self.funder.currentText() == "Entreprise"
+        is_company = self._safe_combo_text(self.funder, "Entreprise") == "Entreprise"
         self.funder_details.setEnabled(not is_company)
         if is_company:
             self.funder_details.clear()
@@ -1064,7 +1363,15 @@ class CloudGenerateDocumentsDialog(QDialog):
                     self.modality.setCurrentIndex(index)
                     break
             maximum = int(training.get("max_participants") or 1)
+            reference = str(training.get("reference") or "").strip().upper()
+            # L'offre FP-BTP-PILOTAGE accepte 1 ou 2 dirigeants. Certains
+            # enregistrements historiques du catalogue ont encore max_participants=1.
+            if reference.startswith("FP-BTP-PILOTAGE") and "-PRO" not in reference:
+                maximum = max(2, maximum)
             self.participant_count.setMaximum(max(1, maximum))
+            if len(self.selected_learners) > max(1, maximum):
+                self.selected_learners = self.selected_learners[: max(1, maximum)]
+                self._render_selected_learners()
         self._recalculate_end_date()
         self._refresh_summary()
 
@@ -1073,6 +1380,12 @@ class CloudGenerateDocumentsDialog(QDialog):
         self._refresh_summary()
 
     def _refresh_summary(self) -> None:
+        # During _build_ui(), some widgets (modality/location fields) emit
+        # signals before the document checkboxes and summary widget exist.
+        # Ignore those early refresh requests until the UI is fully built.
+        if not hasattr(self, "type_checks") or not hasattr(self, "summary"):
+            return
+
         prospect = self._selected_prospect() or {}
         training = self._selected_training() or {}
         selected = [
@@ -1093,11 +1406,155 @@ class CloudGenerateDocumentsDialog(QDialog):
             f"Horaires : {self.daily_schedule.text().strip() or '—'}\n"
             f"Modalité : {self.modality.currentText()}\n"
             f"Participants : {self.participant_count.value()}\n"
-            f"Formateur : {self._selected_trainer_name() or 'Non renseigné'}\n"
-            f"Financeur : {self.funder.currentText() or 'Entreprise'}\n\n"
+            + (
+                "Apprenants : "
+                + ", ".join(
+                    str(item.get("full_name") or (f"{item.get('first_name') or ''} {item.get('last_name') or ''}").strip())
+                    for item in self.selected_learners
+                )
+                + "\n"
+                if self.selected_learners
+                else ""
+            )
+            + f"Formateur : {self._selected_trainer_name() or 'Non renseigné'}\n"
+            f"Financeur : {self._safe_combo_text(self.funder, 'Entreprise') or 'Entreprise'}\n\n"
             "DOCUMENTS\n"
             + ("\n".join(f"• {item}" for item in selected) or "• Aucun")
+            + "\n\nSORTIE\n"
+            + f"Format : {self.output_format.currentText() if hasattr(self, 'output_format') else 'Word (.docx)'}\n"
+            + f"Dossier parent : {self.output_folder.text().strip() if hasattr(self, 'output_folder') and self.output_folder.text().strip() else 'Non sélectionné'}"
         )
+
+    def _modality_changed(self) -> None:
+        modality = str(self.modality.currentData() or "distance").lower()
+        is_distance = "distance" in modality
+        is_mixed = "hybride" in modality or "mixte" in modality
+        is_presentiel = not is_distance and not is_mixed
+
+        show_location = is_presentiel or is_mixed
+        show_link = is_distance or is_mixed
+        self.location_name_block.setHidden(not show_location)
+        self.location_address_block.setHidden(not show_location)
+        self.connection_link_block.setHidden(not show_link)
+        self.location_name.setEnabled(show_location)
+        self.location_address.setEnabled(show_location)
+        self.connection_link.setEnabled(show_link)
+
+        # Actualiser uniquement la carte Planification. Ne pas appeler
+        # self.adjustSize() ici : pendant la construction du dialogue cela peut
+        # invalider des widgets créés plus bas (ex. le champ Financeur).
+        for widget in (
+            self.location_name_block,
+            self.location_address_block,
+            self.connection_link_block,
+        ):
+            widget.updateGeometry()
+        if hasattr(self, "planning_grid"):
+            self.planning_grid.invalidate()
+            self.planning_grid.activate()
+        if hasattr(self, "planning_card"):
+            self.planning_card.updateGeometry()
+        if hasattr(self, "form_scroll"):
+            self.form_scroll.widget().updateGeometry()
+        self._refresh_summary()
+
+    def _selected_company_name(self) -> str:
+        prospect = self._selected_prospect() or {}
+        return str(prospect.get("company_name") or "").strip()
+
+    def _max_participants(self) -> int:
+        training = self._selected_training() or {}
+        try:
+            maximum = max(1, int(training.get("max_participants") or 1))
+        except (TypeError, ValueError):
+            maximum = 1
+        reference = str(training.get("reference") or "").strip().upper()
+        if reference.startswith("FP-BTP-PILOTAGE") and "-PRO" not in reference:
+            maximum = max(2, maximum)
+        return maximum
+
+    def _add_learners(self) -> None:
+        remaining = self._max_participants() - len(self.selected_learners)
+        if remaining <= 0:
+            QMessageBox.information(
+                self,
+                "Participants",
+                "Le nombre maximal de participants prévu pour cette formation est déjà atteint.",
+            )
+            return
+        excluded = {str(item.get("id") or "") for item in self.selected_learners}
+        dialog = LearnerSelectionDialog(
+            self.api,
+            self,
+            excluded_ids=excluded,
+            company_name=self._selected_company_name(),
+            max_to_select=remaining,
+        )
+        try:
+            accepted = dialog.exec()
+        except CloudAPIError as exc:
+            QMessageBox.warning(
+                self,
+                "Gestion des apprenants",
+                "La gestion nominative des apprenants n'est pas disponible pour ce compte. "
+                "Vous pouvez continuer avec le nombre de participants manuel.\n\n" + str(exc),
+            )
+            return
+        if accepted != QDialog.Accepted:
+            return
+        known = {str(item.get("id") or "") for item in self.selected_learners}
+        for learner in dialog.selected_learners:
+            learner_id = str(learner.get("id") or "")
+            if learner_id and learner_id not in known:
+                self.selected_learners.append(learner)
+                known.add(learner_id)
+        self._render_selected_learners()
+
+    def _remove_selected_learner(self) -> None:
+        row = self.learners_table.currentRow()
+        if row < 0 or row >= len(self.selected_learners):
+            return
+        self.selected_learners.pop(row)
+        self._render_selected_learners()
+
+    def _render_selected_learners(self) -> None:
+        self.learners_table.setRowCount(len(self.selected_learners))
+        for row, learner in enumerate(self.selected_learners):
+            full_name = str(learner.get("full_name") or "").strip() or (
+                f"{learner.get('first_name') or ''} {learner.get('last_name') or ''}".strip()
+            )
+            values = [
+                full_name or "—",
+                str(learner.get("job_title") or "—"),
+                str(learner.get("email") or "—"),
+                str(learner.get("phone") or "—"),
+            ]
+            for col, value in enumerate(values):
+                self.learners_table.setItem(row, col, QTableWidgetItem(value))
+
+        if self.selected_learners:
+            self.participant_count.blockSignals(True)
+            self.participant_count.setValue(len(self.selected_learners))
+            self.participant_count.setEnabled(False)
+            self.participant_count.blockSignals(False)
+            self.learners_hint.setText(
+                f"{len(self.selected_learners)} apprenant(s) nominatif(s) seront rattachés à la session. "
+                "Le compteur de participants est maintenant automatique."
+            )
+            self.learners_hint.setStyleSheet(
+                "color:#067647;font-size:9px;background:#ECFDF3;border:1px solid #ABEFC6;"
+                "border-radius:9px;padding:8px 10px;"
+            )
+        else:
+            self.participant_count.setEnabled(True)
+            self.learners_hint.setText(
+                "Aucun apprenant nominatif ajouté. Le nombre de participants reste saisissable manuellement pour les dossiers historiques."
+            )
+            self.learners_hint.setStyleSheet(
+                "color:#64748B;font-size:9px;background:#F8FBFF;border:1px solid #E2ECF7;"
+                "border-radius:9px;padding:8px 10px;"
+            )
+        self._refresh_summary()
 
     def _selected_trainer(self) -> dict | None:
         data = self.trainer_combo.currentData()
@@ -1110,12 +1567,68 @@ class CloudGenerateDocumentsDialog(QDialog):
     def _generate(self) -> None:
         prospect_id = self.prospect_combo.currentData()
         training_id = self.training_combo.currentData()
-        document_types = list(self.DOCUMENT_TYPES)
+        document_types = [
+            name
+            for name, check in self.type_checks.items()
+            if check.isChecked()
+        ]
+        if not document_types:
+            QMessageBox.information(
+                self,
+                "Documents",
+                "Sélectionnez au moins un document à générer.",
+            )
+            return
+
+        # Précontrôle UX uniquement : le Backend reste l'autorité et répète
+        # impérativement ce contrôle au moment de la génération.
+        try:
+            quota = self.api.get_cloud_document_quota()
+        except CloudAPIError as exc:
+            QMessageBox.warning(self, "Documents", str(exc))
+            return
+        if quota.get("limited"):
+            current_count = int(quota.get("count") or 0)
+            quota_limit = int(quota.get("limit") or 100)
+            if (
+                not quota.get("can_create", True)
+                or current_count + len(document_types) > quota_limit
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Bibliothèque complète",
+                    (
+                        f"Votre bibliothèque contient {current_count} documents. "
+                        "Supprimez des documents inutiles ou réduisez la sélection "
+                        "avant de pouvoir en générer de nouveaux."
+                    ),
+                )
+                return
+
+        if not self.output_root:
+            QMessageBox.information(
+                self,
+                "Emplacement du dossier",
+                "Choisissez l’emplacement dans lequel Form@Prospect doit créer le dossier du client.",
+            )
+            return
         if not prospect_id or not training_id:
             QMessageBox.warning(
                 self,
                 "Dossier incomplet",
-                "Sélectionnez un prospect et une formation.",
+                "Sélectionnez un client et une formation.",
+            )
+            return
+        selected_client = self._selected_prospect() or {}
+        if str(selected_client.get("pipeline_stage") or "").strip() != "gagne":
+            QMessageBox.warning(
+                self,
+                "Client obligatoire",
+                (
+                    "Une session de formation et son dossier ne peuvent être créés "
+                    "qu'après transformation du prospect en client.\n\n"
+                    "Finalisez d'abord la fiche client dans le CRM."
+                ),
             )
             return
         if not self.daily_schedule.text().strip():
@@ -1133,6 +1646,35 @@ class CloudGenerateDocumentsDialog(QDialog):
                 "Sélectionnez un formateur actif dans l'annuaire.",
             )
             return
+
+        modality = str(self.modality.currentData() or "distance").lower()
+        is_distance = "distance" in modality
+        is_mixed = "hybride" in modality or "mixte" in modality
+        is_presentiel = not is_distance and not is_mixed
+        if (is_presentiel or is_mixed) and (
+            not self.location_name.text().strip()
+            or not self.location_address.text().strip()
+        ):
+            QMessageBox.warning(
+                self,
+                "Lieu de formation",
+                "Renseignez le lieu et l'adresse pour une formation en présentiel ou mixte.",
+            )
+            return
+        if (is_distance or is_mixed) and not self.connection_link.text().strip():
+            answer = QMessageBox.question(
+                self,
+                "Lien de connexion",
+                (
+                    "Aucun lien Google Meet n'est renseigné. Le document indiquera "
+                    "que le lien sera communiqué avant la formation.\n\n"
+                    "Voulez-vous continuer ?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
 
         training = self._selected_training() or {}
         duration = self._safe_float(training.get("duration_hours"))
@@ -1195,10 +1737,12 @@ class CloudGenerateDocumentsDialog(QDialog):
             "modality": str(self.modality.currentData() or "distance"),
             "trainer_id": str(trainer.get("id") or ""),
             "trainer_name": self._selected_trainer_name(),
-            "funder": self.funder.currentText() or "Entreprise",
+            "funder": self._safe_combo_text(self.funder, "Entreprise") or "Entreprise",
             "funder_details": self.funder_details.text().strip(),
             "participant_count": self.participant_count.value(),
             "connection_link": self.connection_link.text().strip(),
+            "location_name": self.location_name.text().strip(),
+            "location_address": self.location_address.text().strip(),
             "status": "planned",
         }
 
@@ -1221,8 +1765,13 @@ class CloudGenerateDocumentsDialog(QDialog):
         self.status_label.setStyleSheet(f"color:{MUTED};")
         try:
             session = self.api.create_document_session(payload)
+            session_id = str(session["id"])
+            for learner in self.selected_learners:
+                learner_id = str(learner.get("id") or "").strip()
+                if learner_id:
+                    self.api.add_cloud_session_learner(session_id, learner_id)
             self.generated_documents = self.api.generate_cloud_documents(
-                str(session["id"]),
+                session_id,
                 document_types,
             )
         except (CloudAPIError, KeyError) as exc:
@@ -1237,20 +1786,40 @@ class CloudGenerateDocumentsDialog(QDialog):
             f"{item.get('document_number', '')}"
             for item in self.generated_documents
         ]
-        answer = QMessageBox.question(
+
+        try:
+            folder, downloaded_count = self._download_generated_selection()
+        except (CloudAPIError, RuntimeError) as exc:
+            self.generate_button.setEnabled(True)
+            self.status_label.setText(
+                f"⚠ Documents générés dans le Cloud, mais téléchargement local incomplet : {exc}"
+            )
+            self.status_label.setStyleSheet("color:#B54708;")
+            QMessageBox.warning(
+                self,
+                "Documents générés — téléchargement à vérifier",
+                (
+                    f"La génération Cloud a réussi pour {self.generated_client_name}.\n\n"
+                    + "\n".join(lines)
+                    + f"\n\nLe téléchargement local n’a pas pu être finalisé :\n{exc}\n\n"
+                    "Les documents restent disponibles dans la bibliothèque Cloud."
+                ),
+            )
+            self.accept()
+            return
+
+        output_label = "PDF" if str(self.output_format.currentData()) == "pdf" else "DOCX"
+        QMessageBox.information(
             self,
-            "Dossier client créé",
+            "Documents générés",
             (
-                f"Le dossier Cloud de {self.generated_client_name} a été créé.\n\n"
+                f"La session Cloud de {self.generated_client_name} a été créée.\n\n"
                 f"{len(self.generated_documents)} document(s) généré(s) :\n"
                 + "\n".join(lines)
-                + "\n\nTélécharger aussi le dossier documentaire complet sur votre PC ?"
+                + f"\n\n{downloaded_count} fichier(s) {output_label} enregistré(s) dans :\n\n{folder}"
             ),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
         )
-        if answer == QMessageBox.Yes:
-            self._download_complete_client_folder()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         self.accept()
 
     def _download_complete_client_folder(self) -> None:
@@ -1263,8 +1832,8 @@ class CloudGenerateDocumentsDialog(QDialog):
         if not destination:
             return
         try:
-            folder, count = self.api.download_cloud_client_folder(
-                prospect_id=self.generated_prospect_id,
+            folder, count = self.api.download_cloud_generated_documents(
+                documents=self.generated_documents,
                 client_name=self.generated_client_name,
                 destination_root=destination,
             )
@@ -1276,9 +1845,9 @@ class CloudGenerateDocumentsDialog(QDialog):
             self,
             "Dossier client téléchargé",
             (
-                f"{count} document(s) classé(s) dans :\n\n{folder}\n\n"
-                "01 Devis • 02 Conventions • 03 Programmes • 04 Convocations • "
-                "05 Factures • 06 Attestations"
+                f"{count} document(s) généré(s) à l’instant et classé(s) dans :\n\n"
+                f"{folder}\n\n"
+                "Les documents des anciennes sessions n’ont pas été retéléchargés."
             ),
         )
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
@@ -1333,20 +1902,20 @@ class CloudTrainingDialog(QDialog):
         self.reference = self._line("Ex. FP-BTP-PILOTAGE")
         self.name = self._line("Intitulé officiel")
         self.category = self._line("Ex. Pilotage d'activité")
-        self.modality = QComboBox()
+        self.modality = _FocusWheelComboBox()
         self.modality.addItem("À distance", "distance")
         self.modality.addItem("Présentiel", "presentiel")
         self.modality.addItem("Hybride", "hybride")
-        self.duration = QDoubleSpinBox()
+        self.duration = _FocusWheelDoubleSpinBox()
         self.duration.setRange(0.5, 999)
         self.duration.setDecimals(2)
         self.duration.setValue(14)
         self.duration.setSuffix(" h")
-        self.price = QDoubleSpinBox()
+        self.price = _FocusWheelDoubleSpinBox()
         self.price.setRange(0, 999999)
         self.price.setDecimals(2)
         self.price.setSuffix(" €")
-        self.participants = QSpinBox()
+        self.participants = _FocusWheelSpinBox()
         self.participants.setRange(1, 1000)
         self.participants.setValue(1)
         self.certification = self._line("Certification éventuelle")
@@ -1354,6 +1923,11 @@ class CloudTrainingDialog(QDialog):
         self.description.setMinimumHeight(90)
         self.objectives = QTextEdit()
         self.objectives.setMinimumHeight(90)
+        self.target_audience = QTextEdit()
+        self.target_audience.setMinimumHeight(85)
+        self.target_audience.setPlaceholderText(
+            "Décrivez précisément les bénéficiaires de cette formation."
+        )
         self.prerequisites = QTextEdit()
         self.prerequisites.setMinimumHeight(70)
 
@@ -1367,6 +1941,7 @@ class CloudTrainingDialog(QDialog):
         form.addRow("Certification", self.certification)
         form.addRow("Description / contenu", self.description)
         form.addRow("Objectifs", self.objectives)
+        form.addRow("Public visé", self.target_audience)
         form.addRow("Prérequis", self.prerequisites)
         root.addWidget(card, 1)
 
@@ -1420,6 +1995,9 @@ class CloudTrainingDialog(QDialog):
         self.objectives.setPlainText(
             str(self.training.get("objectives") or "")
         )
+        self.target_audience.setPlainText(
+            str(self.training.get("target_audience") or "")
+        )
         self.prerequisites.setPlainText(
             str(self.training.get("prerequisites") or "")
         )
@@ -1438,6 +2016,7 @@ class CloudTrainingDialog(QDialog):
             "category": self.category.text().strip(),
             "description": self.description.toPlainText().strip(),
             "objectives": self.objectives.toPlainText().strip(),
+            "target_audience": self.target_audience.toPlainText().strip(),
             "prerequisites": self.prerequisites.toPlainText().strip(),
             "duration_hours": self.duration.value(),
             "price_cents": int(round(self.price.value() * 100)),
@@ -1756,9 +2335,9 @@ class CloudTemplateUploadDialog(QDialog):
         form = QFormLayout(card)
         form.setContentsMargins(18, 16, 18, 16)
         form.setSpacing(11)
-        self.document_type = QComboBox()
+        self.document_type = _FocusWheelComboBox()
         self.document_type.addItems(self.DOCUMENT_TYPES)
-        self.training = QComboBox()
+        self.training = _FocusWheelComboBox()
         self.training.addItem("Toutes les formations", None)
         self.name = QLineEdit()
         self.name.setPlaceholderText("Ex. Convention officielle Form@Prof")
@@ -1833,7 +2412,7 @@ class CloudTemplateUploadDialog(QDialog):
             )
             return
         try:
-            self.api.upload_cloud_document_template(
+            result = self.api.upload_cloud_document_template(
                 document_type=self.document_type.currentText(),
                 file_path=self.file_path,
                 name=self.name.text().strip(),
@@ -1842,10 +2421,20 @@ class CloudTemplateUploadDialog(QDialog):
         except CloudAPIError as exc:
             QMessageBox.critical(self, "Upload impossible", str(exc))
             return
+        version = result.get("version")
+        active = bool(result.get("active", True))
+        scope = self.training.currentText()
+        version_text = f"Version active : {version}" if version else "Version active"
         QMessageBox.information(
             self,
             "Modèle disponible",
-            "Le modèle officiel est maintenant disponible dans le Cloud privé.",
+            (
+                "Le modèle officiel est maintenant disponible dans le Cloud privé.\n\n"
+                f"{self.document_type.currentText()}\n"
+                f"{version_text}\n"
+                f"Périmètre : {scope}\n"
+                f"Statut : {'Actif' if active else 'Inactif'}"
+            ),
         )
         self.accept()
 
@@ -1887,8 +2476,8 @@ class CloudAdministrativeUploadDialog(QDialog):
         form = QFormLayout(card)
         form.setContentsMargins(18, 16, 18, 16)
         form.setSpacing(11)
-        self.prospect = QComboBox()
-        self.document_type = QComboBox()
+        self.prospect = _FocusWheelComboBox()
+        self.document_type = _FocusWheelComboBox()
         self.document_type.addItems(self.DOCUMENT_TYPES)
         self.document_number = QLineEdit()
         self.document_number.setPlaceholderText("Facultatif : numéro du document")
