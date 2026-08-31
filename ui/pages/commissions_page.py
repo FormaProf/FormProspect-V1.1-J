@@ -34,6 +34,7 @@ from services.cloud_runtime import CloudRuntime
 from ui.components.metric_card import MetricCard
 from ui.dialogs.new_sale_dialog import NewSaleDialog
 from ui.dialogs.commission_invoices_dialog import CommissionInvoicesDialog
+from ui.dialogs.partner_commission_statements_dialog import PartnerCommissionStatementsDialog
 from services.commission_invoice_pdf import save_invoice_pdf
 
 
@@ -214,6 +215,19 @@ class CommissionsPage(QWidget):
         self.history_button.setFixedHeight(40)
         self.history_button.setStyleSheet(self._secondary_button_style())
         self.history_button.clicked.connect(self._open_invoice_history)
+        # Historique personnel : commerciaux indépendants + administration.
+        # Un Dirigeant hors France utilise le workflow partenaire séparé.
+        self.history_button.setVisible(
+            SessionState.has_role("Commercial", "Administrateur")
+        )
+
+        self.partner_history_button = QPushButton("Relevés partenaire")
+        self.partner_history_button.setFixedHeight(40)
+        self.partner_history_button.setStyleSheet(self._secondary_button_style())
+        self.partner_history_button.setVisible(
+            SessionState.has_role("Administrateur", "Dirigeant hors France")
+        )
+        self.partner_history_button.clicked.connect(self._open_partner_statement_history)
 
         self.invoice_button = QPushButton("Générer ma facture")
         self.invoice_button.setFixedHeight(40)
@@ -230,6 +244,7 @@ class CommissionsPage(QWidget):
         header.addWidget(self.year_combo)
         header.addWidget(refresh_button)
         header.addWidget(self.history_button)
+        header.addWidget(self.partner_history_button)
         header.addWidget(self.invoice_button)
         header.addWidget(self.add_button)
 
@@ -766,8 +781,16 @@ class CommissionsPage(QWidget):
         payment_status = sale.get("payment_status")
         commission_status = sale.get("commission_status")
         self.client_paid_button.setEnabled(active and payment_status == "pending")
+        is_partner_beneficiary = (
+            str(sale.get("commission_beneficiary_type") or "") == "commercial_partner"
+        )
+        # Une commission due à un partenaire ne se paie jamais vente par vente :
+        # relevé -> facture PDF reçue -> paiement groupé.
         self.commission_paid_button.setEnabled(
-            active and payment_status == "paid" and commission_status in {"due", "invoiced"}
+            active
+            and payment_status == "paid"
+            and not is_partner_beneficiary
+            and commission_status in {"due", "invoiced"}
         )
         self.cancel_button.setEnabled(
             active and payment_status != "paid" and commission_status != "paid"
@@ -920,6 +943,22 @@ class CommissionsPage(QWidget):
             QMessageBox.warning(self, "Cloud", "Connectez-vous à Form@Prospect Cloud.")
             return
         dialog = CommissionInvoicesDialog(CloudRuntime.api(), self)
+        dialog.exec()
+        self.rafraichir()
+
+    def _open_partner_statement_history(self) -> None:
+        if not CloudRuntime.is_active():
+            QMessageBox.warning(self, "Cloud", "Connectez-vous à Form@Prospect Cloud.")
+            return
+        if not SessionState.has_role("Administrateur", "Dirigeant hors France"):
+            return
+
+        dialog = PartnerCommissionStatementsDialog(
+            CloudRuntime.api(),
+            self,
+            selected_year=int(self.year_combo.currentText()),
+            selected_month=self.month_combo.currentIndex() + 1,
+        )
         dialog.exec()
         self.rafraichir()
 

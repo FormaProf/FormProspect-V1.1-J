@@ -1440,6 +1440,208 @@ class CloudAPIClient:
             )
         return result
     # ------------------------------------------------------------------
+    # Partner commission statements / partner-issued invoices
+    # ------------------------------------------------------------------
+
+    def list_partner_commission_invoices(
+        self,
+        *,
+        year: int | None = None,
+        commercial_partner_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {"year": year, "commercial_partner_id": commercial_partner_id}
+        payload = self.get_json(
+            "/partner-commission-invoices",
+            params={k: v for k, v in params.items() if v not in (None, "")},
+        )
+        if not isinstance(payload, list):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une liste de relevés partenaires invalide."
+            )
+        return payload
+
+    def get_partner_commission_invoice(self, invoice_id: str) -> dict[str, Any]:
+        payload = self.get_json(
+            f"/partner-commission-invoices/{str(invoice_id or '').strip()}"
+        )
+        if not isinstance(payload, dict):
+            raise CloudAPIError("Form@Prospect Cloud a retourné un relevé partenaire invalide.")
+        return payload
+
+    # 0033B: Administration creates partner statements
+    def list_admin_commercial_partners(self) -> list[dict[str, Any]]:
+        payload = self.get_json("/admin/partners")
+        if not isinstance(payload, list):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une liste de partenaires invalide."
+            )
+        return payload
+
+    def create_partner_commission_statement(
+        self,
+        *,
+        commercial_partner_id: str,
+        year: int,
+        month: int,
+    ) -> dict[str, Any]:
+        partner_id = str(commercial_partner_id or "").strip()
+        if not partner_id:
+            raise CloudAPIError("Sélectionnez le partenaire commercial à clôturer.")
+
+        result = self.post_json(
+            "/partner-commission-invoices",
+            {
+                "commercial_partner_id": partner_id,
+                "year": int(year),
+                "month": int(month),
+            },
+            expected=(201,),
+        )
+        if not isinstance(result, dict):
+            raise CloudAPIError("Form@Prospect Cloud a retourné un relevé partenaire invalide.")
+        return result
+
+    @staticmethod
+    def _partner_invoice_error_message(response, fallback: str) -> str:
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            for key in ("detail", "message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        text = str(getattr(response, "text", "") or "").strip()
+        return text[:500] if text else fallback
+
+    def upload_partner_commission_invoice(
+        self,
+        invoice_id: str,
+        *,
+        invoice_number: str,
+        invoice_issued_at: str,
+        file_path,
+    ) -> dict[str, Any]:
+        from pathlib import Path as _Path
+
+        source = _Path(file_path)
+        if not source.is_file():
+            raise CloudAPIError(f"Le fichier est introuvable : {source}")
+        if source.suffix.lower() != ".pdf":
+            raise CloudAPIError("Seuls les fichiers PDF sont autorisés.")
+
+        invoice_id = str(invoice_id or "").strip()
+        number = str(invoice_number or "").strip()
+        issued_at = str(invoice_issued_at or "").strip()
+        if not invoice_id:
+            raise CloudAPIError("Identifiant du relevé partenaire manquant.")
+        if not number:
+            raise CloudAPIError("Numéro de facture partenaire manquant.")
+        if not issued_at:
+            raise CloudAPIError("Date de facture partenaire manquante.")
+
+        self._ensure_fresh_session()
+        response = None
+        for attempt in range(2):
+            headers = self._headers()
+            headers.pop("Content-Type", None)
+            try:
+                with source.open("rb") as handle:
+                    response = self.http.request(
+                        "POST",
+                        f"{self.base_url}/partner-commission-invoices/{invoice_id}/partner-invoice",
+                        headers=headers,
+                        data={
+                            "invoice_number": number,
+                            "invoice_issued_at": issued_at,
+                        },
+                        files={"file": (source.name, handle, "application/pdf")},
+                        timeout=max(self.timeout, 60),
+                    )
+            except Exception as exc:
+                raise CloudAPIError(
+                    "Impossible d'envoyer la facture partenaire à Form@Prospect Cloud."
+                ) from exc
+
+            if response.status_code == 200:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    return payload
+                raise CloudAPIError(
+                    "Form@Prospect Cloud a retourné une réponse de facture partenaire invalide."
+                )
+            if response.status_code == 401 and attempt == 0:
+                self._refresh_after_401()
+                continue
+            break
+
+        assert response is not None
+        raise CloudAPIError(
+            self._partner_invoice_error_message(
+                response, "La facture partenaire n'a pas pu être déposée."
+            ),
+            status_code=response.status_code,
+        )
+
+    def get_partner_commission_invoice_download(
+        self, invoice_id: str
+    ) -> dict[str, Any]:
+        payload = self.get_json(
+            f"/partner-commission-invoices/{str(invoice_id or '').strip()}/partner-invoice/download"
+        )
+        if not isinstance(payload, dict) or not str(payload.get("url") or "").strip():
+            raise CloudAPIError(
+                "Form@Prospect Cloud n'a pas retourné de lien de téléchargement valide."
+            )
+        return payload
+
+    def download_partner_commission_invoice(self, invoice_id: str, destination):
+        from pathlib import Path as _Path
+        import requests as _requests
+
+        metadata = self.get_partner_commission_invoice_download(invoice_id)
+        url = str(metadata.get("url") or "").strip()
+        target = _Path(destination)
+        if target.suffix.lower() != ".pdf":
+            target = target.with_suffix(".pdf")
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            response = _requests.get(url, timeout=max(self.timeout, 60))
+        except _requests.RequestException as exc:
+            raise CloudAPIError("Impossible de télécharger la facture partenaire.") from exc
+
+        if response.status_code != 200:
+            raise CloudAPIError(
+                "Le téléchargement de la facture partenaire a échoué.",
+                status_code=response.status_code,
+            )
+        try:
+            target.write_bytes(response.content)
+        except OSError as exc:
+            raise CloudAPIError(f"Impossible d'enregistrer la facture ici : {target}") from exc
+        return target
+
+    def mark_partner_commission_invoice_paid(
+        self,
+        invoice_id: str,
+        *,
+        reference: str = "",
+        paid_at: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"reference": str(reference or "").strip()}
+        if paid_at:
+            payload["paid_at"] = paid_at
+        result = self.patch_json(
+            f"/partner-commission-invoices/{str(invoice_id or '').strip()}/payment",
+            payload,
+        )
+        if not isinstance(result, dict):
+            raise CloudAPIError("Form@Prospect Cloud a retourné un paiement partenaire invalide.")
+        return result
+
+    # ------------------------------------------------------------------
     # Admin statistics
     # ------------------------------------------------------------------
 
