@@ -470,13 +470,64 @@ class WebFallbackFinder:
 
     def rechercher(self, identity: dict) -> dict:
         self.last_errors = []
+
+        queries = list(
+            dict.fromkeys(
+                query
+                for query in self._query_plan(identity)
+                if str(query or "").strip()
+            )
+        )
+
+        # Exécuter tous les axes prioritaires (localisation actuelle, SIRET,
+        # historique) avant d'appliquer la limite globale de pages à ouvrir.
+        # Les recherches sont parallélisées pour ne pas multiplier le temps
+        # d'attente réseau lorsque plusieurs requêtes sont nécessaires.
+        search_results = {query: [] for query in queries}
+
+        if queries:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(self.MAX_QUERIES, len(queries))
+            ) as executor:
+                future_to_query = {
+                    executor.submit(self._search_urls, query): query
+                    for query in queries
+                }
+
+                for future in concurrent.futures.as_completed(future_to_query):
+                    query = future_to_query[future]
+                    try:
+                        search_results[query] = list(future.result() or [])
+                    except Exception as exc:
+                        self.last_errors.append(
+                            f"recherche web '{query}': "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        search_results[query] = []
+
+        # Répartition équitable des URLs : on prend d'abord le premier résultat
+        # de chaque requête, puis le deuxième, etc. Ainsi une recherche large
+        # ne peut plus consommer seule MAX_FETCHES avant que le SIRET ou
+        # l'ancienne implantation aient été exploités.
         urls = []
-        for query in self._query_plan(identity):
-            for url in self._search_urls(query):
-                if url not in urls:
+        max_depth = max(
+            (len(results) for results in search_results.values()),
+            default=0,
+        )
+
+        for index in range(max_depth):
+            for query in queries:
+                results = search_results.get(query) or []
+                if index >= len(results):
+                    continue
+
+                url = results[index]
+                if url and url not in urls:
                     urls.append(url)
+
                 if len(urls) >= self.MAX_FETCHES:
                     break
+
             if len(urls) >= self.MAX_FETCHES:
                 break
 
@@ -484,19 +535,30 @@ class WebFallbackFinder:
             return self._empty(self.last_errors)
 
         candidates = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(urls))) as executor:
-            futures = [executor.submit(self._fetch_candidate, url, identity) for url in urls]
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(4, len(urls))
+        ) as executor:
+            futures = [
+                executor.submit(self._fetch_candidate, url, identity)
+                for url in urls
+            ]
             for future in concurrent.futures.as_completed(futures):
                 try:
                     candidate = future.result()
                 except Exception as exc:
-                    self.last_errors.append(f"lecture web: {type(exc).__name__}: {exc}")
+                    self.last_errors.append(
+                        f"lecture web: {type(exc).__name__}: {exc}"
+                    )
                     continue
+
                 if candidate:
                     candidates.append(candidate)
 
         result = self._merge_valid(candidates)
-        result["technical_errors"] = list(dict.fromkeys(
-            list(result.get("technical_errors") or []) + self.last_errors
-        ))
+        result["technical_errors"] = list(
+            dict.fromkeys(
+                list(result.get("technical_errors") or [])
+                + self.last_errors
+            )
+        )
         return result
