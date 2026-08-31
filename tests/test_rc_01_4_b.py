@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sqlite3
 import tempfile
@@ -12,7 +12,7 @@ from services.deployment.readers.prospect_reader import (
 )
 
 
-class TestRepository(ProspectRepository):
+class FakeRepository(ProspectRepository):
     def __init__(self, database_path):
         self.database_path = database_path
 
@@ -76,7 +76,7 @@ class RC014BTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def test_repository_iterates_without_loading_all(self):
-        repository = TestRepository(self.database_path)
+        repository = FakeRepository(self.database_path)
         batches = list(
             repository.iterate_deployment_batches(batch_size=5)
         )
@@ -86,7 +86,7 @@ class RC014BTests(unittest.TestCase):
         self.assertTrue(batches[-1].is_last)
 
     def test_reader_uses_repository(self):
-        repository = TestRepository(self.database_path)
+        repository = FakeRepository(self.database_path)
         reader = ProspectDeploymentReader(repository)
         context = DeploymentContext(
             entity_type="prospect",
@@ -99,7 +99,7 @@ class RC014BTests(unittest.TestCase):
         self.assertEqual([batch.count for batch in batches], [4, 4, 4])
 
     def test_resume_offset(self):
-        repository = TestRepository(self.database_path)
+        repository = FakeRepository(self.database_path)
         batches = list(
             repository.iterate_deployment_batches(
                 batch_size=5,

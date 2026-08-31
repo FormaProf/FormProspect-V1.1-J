@@ -43,6 +43,7 @@ def project(tmp_path):
     folder = tmp_path / "Projet test"
     folder.mkdir()
     (folder / "project.json").write_text("{}", encoding="utf-8")
+    (folder / "project.db").touch()
     return Project(folder)
 
 
@@ -73,10 +74,12 @@ def test_deploy_imports_before_marking_project_deployed(project):
     assert result.import_result.imported_prospects == 7
     assert manager.cloud["deployment_status"] == "deployed"
     assert manager.cloud["project_id"] == "cloud-123"
-    assert len(manager.updated) == 1
+    assert len(manager.updated) == 2
+    assert manager.updated[0]["project_id"] == "cloud-123"
+    assert manager.updated[1]["last_sync_at"]
 
 
-def test_failed_import_does_not_switch_local_project_to_cloud(project):
+def test_import_exception_keeps_cloud_identity_for_retry(project):
     manager = FakeProjectManager(deployed=False)
     service = ProjectDeploymentService(manager)
     api = Mock()
@@ -86,12 +89,20 @@ def test_failed_import_does_not_switch_local_project_to_cloud(project):
     }
 
     with patch("services.project_deployment_service.CloudRuntime.api", return_value=api), \
-         patch.object(service, "_import_local_prospects", return_value=import_result(7, 6, 1)):
+         patch.object(
+             service,
+             "_import_local_prospects",
+             side_effect=RuntimeError("import interrompu"),
+         ):
         with pytest.raises(ProjectDeploymentError):
             service.deploy(project)
 
-    assert manager.updated == []
-    assert manager.cloud["deployment_status"] == "local"
+    # L'identité Cloud est volontairement persistée avant l'import afin qu'un
+    # nouvel essai puisse réutiliser le projet déjà créé au lieu d'en créer un second.
+    assert len(manager.updated) == 1
+    assert manager.cloud["project_id"] == "cloud-123"
+    assert manager.cloud["organization_id"] == "org-1"
+    assert manager.cloud["deployment_status"] == "deployed"
 
 
 def test_synchronize_reuses_existing_cloud_project(project):

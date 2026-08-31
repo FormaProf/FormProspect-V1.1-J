@@ -16,6 +16,7 @@ class FakeProject:
 class FakeContext:
     is_cloud: bool
     project: FakeProject = FakeProject()
+    project_id: str | None = None
 
 
 class FakeResolver:
@@ -23,7 +24,10 @@ class FakeResolver:
         self.cloud = cloud
 
     def resolve(self):
-        return FakeContext(is_cloud=self.cloud)
+        return FakeContext(
+            is_cloud=self.cloud,
+            project_id="cloud-project" if self.cloud else None,
+        )
 
     def is_cloud(self):
         return self.cloud
@@ -79,6 +83,14 @@ class FakeProvider:
 
 
 class ProspectServiceTests(unittest.TestCase):
+    def setUp(self):
+        self._has_project_patcher = patch(
+            "services.prospect_service.ApplicationState.has_project",
+            return_value=True,
+        )
+        self._has_project_patcher.start()
+        self.addCleanup(self._has_project_patcher.stop)
+
     def test_local_project_uses_local_provider(self):
         service = ProspectService(
             resolver=FakeResolver(cloud=False)
@@ -113,7 +125,10 @@ class ProspectServiceTests(unittest.TestCase):
 
         self.assertEqual(result, [("prospect",)])
         self.assertEqual(service._last_total, 12)
-        cloud_provider.assert_called_once_with("api")
+        cloud_provider.assert_called_once_with(
+            "api",
+            project_id="cloud-project",
+        )
         local_provider.assert_not_called()
 
     def test_pipeline_validation_is_preserved(self):
