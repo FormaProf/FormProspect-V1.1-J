@@ -109,6 +109,11 @@ class CloudTrainerDialog(QDialog):
         self.last_name = self._line("Nom")
         self.email = self._line("Adresse e-mail professionnelle")
         self.phone = self._line("Téléphone")
+        self.gender = QComboBox()
+        self.gender.setMinimumHeight(34)
+        self.gender.addItem("Non renseigné", "unspecified")
+        self.gender.addItem("Masculin", "male")
+        self.gender.addItem("Féminin", "female")
         self.professional_status = QComboBox()
         self.professional_status.setMinimumHeight(34)
         self.professional_status.addItem("Sous-traitant", "subcontractor")
@@ -155,6 +160,7 @@ class CloudTrainerDialog(QDialog):
         form.addRow("Nom *", self.last_name)
         form.addRow("E-mail", self.email)
         form.addRow("Téléphone", self.phone)
+        form.addRow("Sexe", self.gender)
         form.addRow("Statut professionnel", self.professional_status)
         form.addRow("SIRET", self.siret)
         form.addRow("Lien disponibilités", self.availability_url)
@@ -202,6 +208,11 @@ class CloudTrainerDialog(QDialog):
         self.last_name.setText(str(self.trainer.get("last_name") or ""))
         self.email.setText(str(self.trainer.get("email") or ""))
         self.phone.setText(str(self.trainer.get("phone") or ""))
+        gender = self.gender.findData(
+            str(self.trainer.get("gender") or "unspecified")
+        )
+        if gender >= 0:
+            self.gender.setCurrentIndex(gender)
         status = self.professional_status.findData(
             str(self.trainer.get("professional_status") or "subcontractor")
         )
@@ -276,6 +287,7 @@ class CloudTrainerDialog(QDialog):
             "professional_status": str(
                 self.professional_status.currentData() or "subcontractor"
             ),
+            "gender": str(self.gender.currentData() or "unspecified"),
             "siret": siret,
             "availability_url": availability_url,
             "specialties": self.specialties.toPlainText().strip(),
