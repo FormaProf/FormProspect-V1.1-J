@@ -338,46 +338,134 @@ class WebFallbackFinder:
 
     @staticmethod
     def _merge_valid(candidates: list[dict]) -> dict:
-        valid = [x for x in candidates if x.get("confidence") == "validated"]
+        valid = [
+            item
+            for item in candidates
+            if item.get("confidence") == "validated"
+        ]
         if not valid:
-            best = max(candidates, key=lambda x: int(x.get("match_score") or 0), default=None)
+            best = max(
+                candidates,
+                key=lambda item: int(item.get("match_score") or 0),
+                default=None,
+            )
             return best or WebFallbackFinder._empty()
 
-        valid.sort(key=lambda x: int(x.get("match_score") or 0), reverse=True)
-        best = dict(valid[0])
+        valid.sort(
+            key=lambda item: int(item.get("match_score") or 0),
+            reverse=True,
+        )
+
+        best_source = valid[0]
+        best = dict(best_source)
+
+        def has_strong_merge_evidence(item: dict) -> bool:
+            reasons = {
+                str(reason or "").strip().lower()
+                for reason in item.get("match_reasons") or []
+                if str(reason or "").strip()
+            }
+
+            # Un identifiant légal exact suffit pour autoriser la fusion,
+            # y compris pour un ancien établissement du même SIREN.
+            if "siret exact" in reasons or "siren exact" in reasons:
+                return True
+
+            score = int(item.get("match_score") or 0)
+
+            very_close_name = any(
+                reason in reasons
+                for reason in (
+                    "nom très proche",
+                    "enseigne/alias très proche",
+                )
+            )
+
+            location_evidence = any(
+                reason in reasons
+                for reason in (
+                    "code postal exact",
+                    "code postal présent",
+                    "ville exacte",
+                    "ville présente",
+                    "adresse proche",
+                    "adresse partiellement proche",
+                )
+            )
+
+            # Plus strict que le simple statut "validated" (>= 65) :
+            # un candidat secondaire doit être vraiment convaincant avant
+            # d'ajouter ses coordonnées au meilleur résultat.
+            return (
+                score >= 85
+                and very_close_name
+                and location_evidence
+            )
+
+        trusted = [best_source]
+        trusted.extend(
+            item
+            for item in valid[1:]
+            if has_strong_merge_evidence(item)
+        )
+
         faxes = []
         phones = []
         emails = []
         sites = []
         details = []
         texts = []
-        for item in valid:
+
+        for item in trusted:
             faxes.extend(item.get("faxes") or [])
             phones.extend(item.get("telephones") or [])
+
             if item.get("email"):
                 emails.append(item["email"])
+
             if item.get("site_web"):
                 sites.append(item["site_web"])
+
             if item.get("source_detail"):
                 details.append(item["source_detail"])
+
             if item.get("texte"):
                 texts.append(item["texte"])
 
-        fax_keys = {re.sub(r"\D", "", x) for x in faxes}
+        fax_keys = {
+            re.sub(r"\D", "", fax)
+            for fax in faxes
+            if re.sub(r"\D", "", fax)
+        }
+
         merged_phones = []
-        seen = set()
+        seen_phones = set()
+
         for phone in phones:
             key = re.sub(r"\D", "", phone)
-            if key and key not in fax_keys and key not in seen:
-                seen.add(key)
+            if (
+                key
+                and key not in fax_keys
+                and key not in seen_phones
+            ):
+                seen_phones.add(key)
                 merged_phones.append(phone)
 
         best["telephones"] = merged_phones
         best["faxes"] = list(dict.fromkeys(faxes))
-        best["email"] = next((x for x in emails if x), "")
-        best["site_web"] = next((x for x in sites if x), "")
-        best["source_detail"] = " + ".join(dict.fromkeys(details))
+        best["email"] = next(
+            (email for email in emails if email),
+            "",
+        )
+        best["site_web"] = next(
+            (site for site in sites if site),
+            "",
+        )
+        best["source_detail"] = " + ".join(
+            dict.fromkeys(details)
+        )
         best["texte"] = "\n".join(texts)[:30000]
+
         return best
 
     def rechercher(self, identity: dict) -> dict:
