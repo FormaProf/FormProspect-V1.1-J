@@ -25,6 +25,9 @@ class Sidebar(QFrame):
 
     MENU_KEYS = [
         "dashboard",
+        "trainer_dashboard",
+        "trainer_sessions",
+        "trainer_planning",
         "treatment",
         "crm",
         "agenda",
@@ -180,7 +183,13 @@ class Sidebar(QFrame):
 
         layout.addWidget(logo)
 
-        subtitle = QLabel("Plateforme intelligente de prospection commerciale")
+        role = SessionState.user().role if SessionState.user() else ""
+        subtitle_text = (
+            "Espace de suivi pédagogique et de formation"
+            if role == "Formateur"
+            else "Plateforme intelligente de prospection commerciale"
+        )
+        subtitle = QLabel(subtitle_text)
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(
@@ -257,6 +266,9 @@ class Sidebar(QFrame):
 
         menus = [
             ("dashboard", "🏠", "Dashboard"),
+            ("trainer_dashboard", "🏠", "Tableau de bord"),
+            ("trainer_sessions", "🎓", "Mes formations"),
+            ("trainer_planning", "📅", "Mon planning"),
             ("treatment", "📥", "Traitement"),
             ("crm", "👥", "CRM"),
             ("agenda", "📅", "Agenda"),
@@ -313,10 +325,13 @@ class Sidebar(QFrame):
     def apply_permissions(self):
         user = SessionState.user()
         role = user.role if user else "Commercial"
+        trainer_keys = {"trainer_dashboard", "trainer_sessions", "trainer_planning"}
+        standard_keys = set(self.MENU_KEYS) - trainer_keys
         allowed = {
-            "Administrateur": set(self.MENU_KEYS),
-            "Manager": set(self.MENU_KEYS) - {"trainers", "trainer_availability", "commercial_profiles", "statistics"},
+            "Administrateur": standard_keys,
+            "Manager": standard_keys - {"trainers", "trainer_availability", "commercial_profiles", "statistics"},
             "Commercial": {"dashboard", "crm", "agenda", "campaigns", "sequences", "sales", "documents", "trainer_availability", "training_cases", "ai", "activity", "account"},
+            "Formateur": trainer_keys | {"account"},
         }.get(role, {"dashboard", "crm", "account"})
 
         for key, button in self.buttons_by_key.items():

@@ -796,6 +796,31 @@ class CloudAPIClient:
         return payload
 
 
+    def get_my_cloud_trainer_session(self, session_id: str) -> dict[str, Any]:
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            raise CloudAPIError("Identifiant de session formateur manquant.")
+        payload = self.get_json(f"/trainers/me/sessions/{session_id}")
+        if not isinstance(payload, dict):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné un détail de session formateur invalide."
+            )
+        return payload
+
+    def list_my_cloud_trainer_session_learners(
+        self,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            raise CloudAPIError("Identifiant de session formateur manquant.")
+        payload = self.get_json(f"/trainers/me/sessions/{session_id}/learners")
+        if not isinstance(payload, list):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné une liste d'apprenants invalide."
+            )
+        return payload
+
     def list_document_trainings(
         self,
         *,
