@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -344,17 +344,18 @@ class CommissionsPage(QWidget):
         self.show_commercial_column = (
             SessionState.has_role("Administrateur")
             or SessionState.has_role("Manager")
+            or SessionState.has_role("Dirigeant hors France")
         )
 
         if self.show_commercial_column:
             self.table_headers = [
                 "Date", "Client", "Formation", "Commercial",
-                "Montant", "Taux", "Commission", "Statut",
+                "Montant", "Taux", "Commission", "Paiement", "Statut",
             ]
         else:
             self.table_headers = [
                 "Date", "Client", "Formation",
-                "Montant", "Taux", "Commission", "Statut",
+                "Montant", "Taux", "Commission", "Paiement", "Statut",
             ]
 
         self.table = QTableWidget(0, len(self.table_headers))
@@ -366,11 +367,19 @@ class CommissionsPage(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+
+        # Répartition lisible de toute la largeur disponible :
+        # Client gagne un peu d'espace, Formation reste compacte et Statut
+        # absorbe automatiquement tout l'espace restant.
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.table.setColumnWidth(1, 240)
+        self.table.setColumnWidth(2, 190)
 
         if self.show_commercial_column:
-            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+            self.table.setColumnWidth(3, 155)
         self.table.setMinimumHeight(330)
 
         self.table.setStyleSheet("""
@@ -433,15 +442,20 @@ class CommissionsPage(QWidget):
         self.status_col = self.table_headers.index("Statut")
         self.amount_col = self.table_headers.index("Montant")
         self.commission_col = self.table_headers.index("Commission")
+        self.payment_col = self.table_headers.index("Paiement")
 
         self.table.horizontalHeader().setSectionResizeMode(
             self.rate_col, QHeaderView.Fixed
         )
         self.table.horizontalHeader().setSectionResizeMode(
-            self.status_col, QHeaderView.Fixed
+            self.payment_col, QHeaderView.Fixed
         )
+        self.table.horizontalHeader().setSectionResizeMode(
+            self.status_col, QHeaderView.Stretch
+        )
+        self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(self.rate_col, 100)
-        self.table.setColumnWidth(self.status_col, 285)
+        self.table.setColumnWidth(self.payment_col, 185)
 
         table_layout.addWidget(self.table)
         root.addWidget(table_frame, 1)
@@ -568,6 +582,64 @@ class CommissionsPage(QWidget):
         """
 
     @staticmethod
+    def _parse_iso_date(value) -> date | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+        except ValueError:
+            try:
+                return date.fromisoformat(text[:10])
+            except ValueError:
+                return None
+
+    @classmethod
+    def _payment_display(cls, sale: dict) -> tuple[str, str]:
+        status = str(sale.get("payment_status") or "pending").lower()
+        paid_on = cls._parse_iso_date(sale.get("client_paid_at"))
+
+        if status == "paid":
+            if paid_on:
+                text = f"Payé · {paid_on.strftime('%d/%m/%Y')}"
+                return text, f"Paiement client encaissé le {paid_on.strftime('%d/%m/%Y')}."
+            return "Payé", "Paiement client encaissé."
+
+        if status == "refunded":
+            return "Remboursé", "Le règlement client a été remboursé."
+
+        signed_on = cls._parse_iso_date(sale.get("signed_at"))
+        if signed_on is None:
+            return "En attente", "Paiement client en attente de confirmation par l’administration."
+
+        due_on = signed_on + timedelta(days=10)
+        if date.today() > due_on:
+            return (
+                f"En retard · {due_on.strftime('%d/%m')}",
+                f"Paiement en retard. Échéance contractuelle : {due_on.strftime('%d/%m/%Y')}. "
+                "Le commercial peut relancer le client ; seul l’administration peut confirmer l’encaissement.",
+            )
+        return (
+            f"En attente · {due_on.strftime('%d/%m')}",
+            f"Paiement attendu au plus tard le {due_on.strftime('%d/%m/%Y')}. "
+            "Seul l’administration peut confirmer l’encaissement.",
+        )
+
+    @staticmethod
+    def _payment_badge_style(payment_text: str) -> str:
+        text = str(payment_text or "").lower()
+        if "payé" in text:
+            bg, fg, border = "#ECFDF3", "#166534", "#BBF7D0"
+        elif "retard" in text or "rembours" in text:
+            bg, fg, border = "#FEF2F2", "#991B1B", "#FECACA"
+        else:
+            bg, fg, border = "#FFF7ED", "#9A3412", "#FED7AA"
+        return (
+            f"background:{bg}; color:{fg}; border:1px solid {border}; "
+            "border-radius:10px; padding:4px 10px; font-size:10px; font-weight:900;"
+        )
+
+    @staticmethod
     def _status_badge_style(status_text: str) -> str:
         text = str(status_text or "").lower()
 
@@ -600,7 +672,7 @@ class CommissionsPage(QWidget):
 
     @staticmethod
     def _may_create() -> bool:
-        return SessionState.has_role("Administrateur", "Manager", "Commercial")
+        return SessionState.has_role("Administrateur", "Manager", "Dirigeant hors France", "Commercial")
 
     @staticmethod
     def _format_euro(cents: int) -> str:
@@ -660,6 +732,10 @@ class CommissionsPage(QWidget):
             self.subtitle.setText(
                 f"Vue de votre équipe — {MONTHS[month - 1]} {year}"
             )
+        elif user and user.role == "Dirigeant hors France":
+            self.subtitle.setText(
+                f"Vue du call center partenaire — {MONTHS[month - 1]} {year}"
+            )
         else:
             self.subtitle.setText(
                 f"Vue globale Form@Prof — {MONTHS[month - 1]} {year}"
@@ -692,7 +768,7 @@ class CommissionsPage(QWidget):
             values = [
                 signed_at,
                 sale.get("prospect_name") or "",
-                sale.get("offer_name") or "",
+                sale.get("offer_reference") or sale.get("offer_name") or "",
             ]
 
             if self.show_commercial_column:
@@ -703,17 +779,17 @@ class CommissionsPage(QWidget):
                     self._format_euro(int(sale.get("price_cents") or 0)),
                     self._format_rate(sale.get("commission_rate")),
                     self._format_euro(int(sale.get("commission_cents") or 0)),
+                    self._payment_display(sale)[0],
                     sale.get("display_status") or "",
                 ]
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
 
-                if column in (self.amount_col, self.commission_col):
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                elif column in (0, self.rate_col, self.status_col):
-                    item.setTextAlignment(Qt.AlignCenter)
-                elif column == 1:
+                # Toutes les valeurs du tableau sont centrées pour conserver
+                # une lecture homogène, y compris Client / Formation / montants.
+                item.setTextAlignment(Qt.AlignCenter)
+                if column == 1:
                     font = item.font()
                     font.setBold(True)
                     item.setFont(font)
@@ -728,6 +804,16 @@ class CommissionsPage(QWidget):
                     badge.setMinimumWidth(76)
                     badge.setFixedHeight(34)
                     badge.setStyleSheet(self._rate_badge_style())
+                    self.table.setCellWidget(row_index, column, badge)
+
+                elif column == self.payment_col:
+                    payment_text, payment_tooltip = self._payment_display(sale)
+                    badge = QLabel(payment_text)
+                    badge.setAlignment(Qt.AlignCenter)
+                    badge.setToolTip(payment_tooltip)
+                    badge.setMinimumWidth(155)
+                    badge.setFixedHeight(36)
+                    badge.setStyleSheet(self._payment_badge_style(payment_text))
                     self.table.setCellWidget(row_index, column, badge)
 
                 elif column == self.status_col:
@@ -752,9 +838,9 @@ class CommissionsPage(QWidget):
             f"{len(self.sales_rows)} vente(s)"
         )
         self.status_label.setText(
-            "Les commissions sont validées automatiquement à J+15 après "
-            "l’enregistrement de la vente. Si J+15 tombe le mois suivant, "
-            "la commission est reportée sur la facture du mois suivant."
+            "J+15 démarre à la signature de la convention. La commission n’est validée "
+            "automatiquement que si le paiement client a été encaissé. Si J+15 tombe le mois "
+            "suivant, elle est reportée sur la facture du mois suivant."
         )
         self._update_action_buttons()
 
@@ -830,7 +916,8 @@ class CommissionsPage(QWidget):
             self,
             "Confirmer l'encaissement",
             "Confirmez-vous que Form@Prof a encaissé le règlement du client ?\n\n"
-            "La commission passera alors au statut « à verser ».",
+            "Le commercial verra immédiatement le paiement comme encaissé. "
+            "La commission restera en attente jusqu’à J+15 si cette date n’est pas encore atteinte.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         ) != QMessageBox.Yes:

@@ -66,15 +66,15 @@ class NewSaleDialog(QDialog):
             "color:#338CE4; background:transparent; border:none;"
         )
 
-        title = QLabel("Nouvelle vente")
+        title = QLabel("Convention signée · créer la vente")
         title.setStyleSheet(
             "font-size:28px; font-weight:900; color:#0B1220; "
             "background:transparent; border:none;"
         )
 
         subtitle = QLabel(
-            "Sélectionnez le client et la formation. Le prix et le taux de commission "
-            "sont verrouillés automatiquement depuis le catalogue Cloud."
+            "Enregistrez la vente uniquement lorsque la convention de formation est signée. "
+            "La commission est alors créée au statut « En attente » et son délai J+15 démarre."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(
@@ -106,13 +106,14 @@ class NewSaleDialog(QDialog):
         contract_layout.setContentsMargins(20, 18, 20, 20)
         contract_layout.setSpacing(12)
 
-        section_label = QLabel("CONTRAT COMMERCIAL")
+        section_label = QLabel("CONVENTION DE FORMATION SIGNÉE")
         section_label.setStyleSheet(
             "font-size:10px; font-weight:900; letter-spacing:1px; "
             "color:#338CE4; background:transparent; border:none;"
         )
         section_help = QLabel(
-            "Les informations tarifaires sont récupérées automatiquement et ne peuvent pas être modifiées."
+            "Les informations tarifaires sont récupérées automatiquement et ne peuvent pas être modifiées. "
+            "La date ci-dessous doit être la date de signature de la convention."
         )
         section_help.setWordWrap(True)
         section_help.setStyleSheet(
@@ -142,7 +143,7 @@ class NewSaleDialog(QDialog):
 
         grid.addWidget(self._field_block("Client", self.prospect_combo), 0, 0, 1, 2)
         grid.addWidget(self._field_block("Formation vendue", self.training_combo), 1, 0, 1, 2)
-        grid.addWidget(self._field_block("Date de signature", self.date_edit), 2, 0, 1, 2)
+        grid.addWidget(self._field_block("Date de signature de la convention", self.date_edit), 2, 0, 1, 2)
 
         contract_layout.addLayout(grid)
         body_layout.addWidget(contract_card)
@@ -174,7 +175,7 @@ class NewSaleDialog(QDialog):
         )
 
         calc_hint = QLabel(
-            "La commission ne devient due qu'après l'encaissement effectif du client."
+            "La commission reste en attente jusqu’à J+15 et ne peut être validée que si le paiement client est encaissé."
         )
         calc_hint.setWordWrap(True)
         calc_hint.setStyleSheet(
@@ -613,7 +614,7 @@ class NewSaleDialog(QDialog):
         QMessageBox.information(
             self,
             "Vente enregistrée",
-            "La vente a été enregistrée dans le Cloud. La commission reste en attente "
-            "jusqu'à l'encaissement du client.",
+            "La vente a été enregistrée dans le Cloud à la date de signature de la convention. "
+            "La commission est créée « En attente » pour 15 jours et ne sera validée que si le paiement client est encaissé.",
         )
         self.accept()
