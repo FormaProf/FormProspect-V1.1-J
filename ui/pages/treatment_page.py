@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import (
@@ -481,8 +482,9 @@ class TreatmentPage(QWidget):
             )
             self.bouton_appliquer_mise_a_jour.setEnabled(
                 bool(
-                    self.excel_update_preview_stats
-                    and self.excel_update_preview_stats.get("mode_base") == "cloud_ro"
+                    self._excel_update_preview_matches_context(
+                        self.excel_update_preview_stats, context
+                    )
                     and self._excel_update_has_actions(self.excel_update_preview_stats)
                 )
             )
@@ -535,7 +537,12 @@ class TreatmentPage(QWidget):
             bool(self.fichier_excel_mise_a_jour)
         )
         self.bouton_appliquer_mise_a_jour.setEnabled(
-            self._excel_update_has_actions(self.excel_update_preview_stats)
+            bool(
+                self._excel_update_preview_matches_context(
+                    self.excel_update_preview_stats, context
+                )
+                and self._excel_update_has_actions(self.excel_update_preview_stats)
+            )
         )
         if self.excel_update_preview_stats is None:
             self.excel_update_badge.set_state("idle", "Prêt")
@@ -683,6 +690,34 @@ class TreatmentPage(QWidget):
                 str(exc),
             )
 
+    def _excel_update_preview_matches_context(self, stats, context) -> bool:
+        """Vérifie qu'un aperçu appartient toujours au projet actif."""
+        if not stats or context is None:
+            return False
+
+        if context.is_cloud:
+            preview_project_id = str(stats.get("project_id") or "").strip()
+            current_project_id = str(context.project_id or "").strip()
+            return bool(
+                stats.get("mode_base") == "cloud_ro"
+                and preview_project_id
+                and preview_project_id == current_project_id
+            )
+
+        if stats.get("mode_base") != "sqlite_ro":
+            return False
+
+        project = context.project or ApplicationState.get_project()
+        if project is None or not getattr(project, "database", None):
+            return False
+
+        try:
+            preview_db = Path(str(stats.get("base_sqlite") or "")).resolve()
+            current_db = Path(str(project.database)).resolve()
+        except Exception:
+            return False
+        return preview_db == current_db
+
     @staticmethod
     def _excel_update_has_actions(stats) -> bool:
         if not stats:
@@ -710,6 +745,19 @@ class TreatmentPage(QWidget):
             return
 
         context = self.datasource_resolver.resolve()
+        if not self._excel_update_preview_matches_context(
+            self.excel_update_preview_stats, context
+        ):
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
+            self.excel_update_badge.set_state("idle", "Analyse obsolète")
+            QMessageBox.warning(
+                self,
+                "Enrichissement Excel",
+                "Le projet actif a changé depuis l'analyse Excel. "
+                "Relancez « Analyser les mises à jour » avant d'appliquer les ajouts.",
+            )
+            return
+
         if context.is_cloud:
             preview = self.excel_update_preview_stats
             if not self._excel_update_has_actions(preview):

@@ -45,7 +45,7 @@ def test_cloud_apply_does_not_create_local_recovery_point():
 def test_cloud_project_can_enable_apply_after_actionable_preview():
     source = PAGE_PATH.read_text(encoding="utf-8")
 
-    assert 'self.excel_update_preview_stats.get("mode_base") == "cloud_ro"' in source
+    assert "_excel_update_preview_matches_context" in source
     assert "self._excel_update_has_actions(self.excel_update_preview_stats)" in source
     assert "Les écritures Cloud sont additives" in source
 

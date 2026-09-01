@@ -47,7 +47,7 @@ def test_cloud_project_enables_analysis_and_actionable_apply_button():
 
     assert 'self.excel_update_badge.set_state("idle", "Cloud prêt")' in source
     assert "bool(self.fichier_excel_mise_a_jour)" in source
-    assert 'self.excel_update_preview_stats.get("mode_base") == "cloud_ro"' in source
+    assert "_excel_update_preview_matches_context" in source
     assert "self._excel_update_has_actions(self.excel_update_preview_stats)" in source
     assert "Les écritures Cloud sont additives" in source
 

@@ -321,6 +321,10 @@ class ProspectExcelUpdateService:
         analyse = self.analyser_fichier(path)
         df = pd.read_excel(path, dtype=str, keep_default_na=False).fillna("")
         mappings = analyse["colonnes_reconnues"]
+        if not mappings.get("siret"):
+            raise ValueError(
+                "Le fichier Excel ne contient pas de colonne SIRET exploitable."
+            )
 
         parsed_rows = []
         target_sirets = set()
@@ -826,10 +830,11 @@ class ProspectExcelUpdateService:
         - aucune valeur existante n'est supprimée ;
         - contacts, sites et réseaux sont fusionnés sans doublon ;
         - les champs scalaires vides peuvent être complétés ;
-        - les champs scalaires déjà renseignés avec une autre valeur sont
-          conservés et comptés comme conflits ignorés ;
+        - plusieurs valeurs scalaires contradictoires pour le même prospect
+          sont ignorées plutôt que départagées arbitrairement ;
+        - le SIRET est relu juste avant l'UPDATE ;
         - toutes les écritures sont regroupées dans une seule transaction.
-          La moindre erreur SQL provoque un rollback complet.
+          La moindre erreur provoque un rollback complet.
         """
         path = Path(fichier_excel)
         db_path = Path(database_path)
@@ -837,9 +842,6 @@ class ProspectExcelUpdateService:
         if not db_path.exists() or not db_path.is_file():
             raise FileNotFoundError(f"Base SQLite introuvable : {db_path}")
 
-        # La comparaison reste la source de vérité pour déterminer les SIRET
-        # admissibles. Un aperçu intégral est demandé afin de n'omettre aucun
-        # prospect lors de l'application.
         analyse = self.analyser_fichier(path)
         preview = self.comparer_avec_sqlite(
             path,
@@ -863,11 +865,33 @@ class ProspectExcelUpdateService:
             "siret_invalides": int(preview.get("siret_invalides", 0)),
             "ignores_incoherents": int(preview.get("ignores_incoherents", 0)),
             "prospects_mis_a_jour": 0,
+            "prospects_sans_action_runtime": 0,
             "informations_ajoutees": 0,
             "champs_completes": 0,
             "valeurs_fusionnees": 0,
             "conflits_ignores": int(preview.get("conflits_a_verifier", 0)),
+            "conflits_runtime_ignores": 0,
         }
+
+        # Plusieurs lignes Excel peuvent viser le même prospect. On les regroupe
+        # avant toute écriture afin de ne jamais choisir arbitrairement une
+        # première valeur scalaire contradictoire.
+        grouped: dict[object, dict] = {}
+        for item in preview.get("apercu") or []:
+            prospect_id = item.get("prospect_id")
+            if prospect_id is None:
+                continue
+            bucket = grouped.setdefault(
+                prospect_id,
+                {
+                    "prospect_id": prospect_id,
+                    "siret": self._normaliser_identifiant(
+                        item.get("siret", ""), expected_length=14
+                    ),
+                    "differences": [],
+                },
+            )
+            bucket["differences"].extend(item.get("differences") or [])
 
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -876,7 +900,11 @@ class ProspectExcelUpdateService:
         try:
             conn.execute("BEGIN IMMEDIATE")
             available_columns = self._prospect_columns(conn)
-            if not available_columns or "id" not in available_columns or "siret" not in available_columns:
+            if (
+                not available_columns
+                or "id" not in available_columns
+                or "siret" not in available_columns
+            ):
                 raise ValueError(
                     "La table prospects est absente ou ne contient pas les colonnes id/SIRET requises."
                 )
@@ -889,36 +917,41 @@ class ProspectExcelUpdateService:
             )
             selected = ", ".join(f'"{column}"' for column in sorted(readable))
 
-            for item in preview.get("apercu") or []:
-                prospect_id = item.get("prospect_id")
-                if prospect_id is None:
-                    continue
-
+            for prospect_id, item in grouped.items():
                 db_row = conn.execute(
                     f"SELECT {selected} FROM prospects WHERE id = ? LIMIT 1",
                     (prospect_id,),
                 ).fetchone()
                 if db_row is None:
-                    continue
+                    raise ValueError(
+                        f"Le prospect local {prospect_id!r} a disparu depuis l'aperçu ; "
+                        "mise à jour annulée."
+                    )
 
                 current = {column: db_row[column] for column in db_row.keys()}
-                updates: dict[str, str] = {}
+                expected_siret = item.get("siret") or ""
+                current_siret = self._normaliser_identifiant(
+                    current.get("siret", ""), expected_length=14
+                )
+                if not expected_siret or current_siret != expected_siret:
+                    raise ValueError(
+                        "Le SIRET d'un prospect local a changé depuis l'aperçu ; "
+                        "la transaction entière est annulée."
+                    )
 
-                grouped: dict[str, list[dict]] = {}
+                updates: dict[str, str] = {}
+                field_diffs: dict[str, list[dict]] = {}
                 for diff in item.get("differences") or []:
                     destination = str(diff.get("champ_destination") or "").strip()
                     if not destination or destination not in available_columns:
                         continue
                     if diff.get("action") == "verifier":
-                        # Le conflit est volontairement conservé : pas
-                        # d'écrasement d'une donnée scalaire existante.
                         continue
-                    grouped.setdefault(destination, []).append(diff)
+                    field_diffs.setdefault(destination, []).append(diff)
 
-                for destination, differences in grouped.items():
+                for destination, differences in field_diffs.items():
                     current_value = str(current.get(destination, "") or "").strip()
-
-                    incoming_values = []
+                    incoming_values: list[str] = []
                     for diff in differences:
                         incoming_values.extend(
                             str(value).strip()
@@ -945,20 +978,37 @@ class ProspectExcelUpdateService:
                             result["champs_completes"] += 1
                         continue
 
-                    # Champ scalaire : uniquement compléter un champ encore
-                    # vide. Une valeur existante n'est jamais remplacée.
+                    # Champ scalaire : uniquement si le champ est encore vide.
+                    # S'il existe plusieurs propositions distinctes dans le
+                    # fichier pour le même prospect, aucune n'est choisie.
                     if current_value:
                         continue
-                    incoming = incoming_values[0]
-                    if incoming:
-                        updates[destination] = incoming
-                        result["informations_ajoutees"] += 1
-                        result["champs_completes"] += 1
+
+                    unique: list[str] = []
+                    seen = set()
+                    for value in incoming_values:
+                        key = self._normaliser_scalar(value, destination)
+                        if not key or key in seen:
+                            continue
+                        seen.add(key)
+                        unique.append(value)
+
+                    if len(unique) != 1:
+                        if len(unique) > 1:
+                            result["conflits_runtime_ignores"] += 1
+                        continue
+
+                    updates[destination] = unique[0]
+                    result["informations_ajoutees"] += 1
+                    result["champs_completes"] += 1
 
                 if not updates:
+                    result["prospects_sans_action_runtime"] += 1
                     continue
 
-                assignments = ", ".join(f'"{column}" = ?' for column in updates)
+                assignments = ", ".join(
+                    f'"{column}" = ?' for column in updates
+                )
                 params = list(updates.values()) + [prospect_id]
                 conn.execute(
                     f"UPDATE prospects SET {assignments} WHERE id = ?",
