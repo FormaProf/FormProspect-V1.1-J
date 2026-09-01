@@ -132,3 +132,35 @@ def _as_int(value) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def build_excel_update_result_text(stats: dict) -> str:
+    """Construit le bilan d'une mise à jour Excel additive réellement appliquée."""
+    return "\n".join(
+        [
+            "MISE À JOUR EXCEL TERMINÉE",
+            "",
+            f"Fichier : {stats.get('fichier') or '—'}",
+            "Clé de correspondance : SIRET exact uniquement",
+            "Création automatique de prospects : NON",
+            "Suppression de données existantes : NON",
+            "Transaction atomique / rollback en cas d'erreur : OUI",
+            "",
+            "RÉSULTAT",
+            f"Prospects retrouvés par SIRET : {_as_int(stats.get('correspondances_siret'))}",
+            f"Prospects mis à jour : {_as_int(stats.get('prospects_mis_a_jour'))}",
+            f"Informations ajoutées : {_as_int(stats.get('informations_ajoutees'))}",
+            f"Champs vides complétés : {_as_int(stats.get('champs_completes'))}",
+            f"Valeurs fusionnées : {_as_int(stats.get('valeurs_fusionnees'))}",
+            f"Conflits conservés sans écrasement : {_as_int(stats.get('conflits_ignores'))}",
+            "",
+            "IGNORÉS SANS MODIFICATION",
+            f"SIRET introuvables : {_as_int(stats.get('introuvables'))}",
+            f"SIRET absents : {_as_int(stats.get('sans_siret'))}",
+            f"SIRET invalides : {_as_int(stats.get('siret_invalides'))}",
+            f"SIRET ambigus : {_as_int(stats.get('ambigus_siret'))}",
+            f"Identifiants incohérents : {_as_int(stats.get('ignores_incoherents'))}",
+            "",
+            "Aucune ancienne donnée n'a été supprimée.",
+        ]
+    )

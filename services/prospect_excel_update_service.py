@@ -276,7 +276,15 @@ class ProspectExcelUpdateService:
         "code_naf": "code_naf",
     }
 
-    MERGE_FIELDS = {"telephone", "email"}
+    MERGE_FIELDS = {
+        "telephone",
+        "email",
+        "site_web",
+        "linkedin",
+        "facebook",
+        "instagram",
+        "youtube",
+    }
 
     def comparer_avec_sqlite(
         self,
@@ -456,6 +464,195 @@ class ProspectExcelUpdateService:
                 )
 
         return stats
+
+    def appliquer_mise_a_jour_sqlite(
+        self,
+        fichier_excel,
+        database_path,
+    ) -> dict:
+        """Applique une mise à jour Excel additive sur un projet SQLite local.
+
+        Règles impératives :
+        - correspondance par SIRET exact uniquement ;
+        - aucun INSERT et aucune création de prospect ;
+        - aucune valeur existante n'est supprimée ;
+        - contacts, sites et réseaux sont fusionnés sans doublon ;
+        - les champs scalaires vides peuvent être complétés ;
+        - les champs scalaires déjà renseignés avec une autre valeur sont
+          conservés et comptés comme conflits ignorés ;
+        - toutes les écritures sont regroupées dans une seule transaction.
+          La moindre erreur SQL provoque un rollback complet.
+        """
+        path = Path(fichier_excel)
+        db_path = Path(database_path)
+
+        if not db_path.exists() or not db_path.is_file():
+            raise FileNotFoundError(f"Base SQLite introuvable : {db_path}")
+
+        # La comparaison reste la source de vérité pour déterminer les SIRET
+        # admissibles. Un aperçu intégral est demandé afin de n'omettre aucun
+        # prospect lors de l'application.
+        analyse = self.analyser_fichier(path)
+        preview = self.comparer_avec_sqlite(
+            path,
+            db_path,
+            apercu_limite=max(0, int(analyse.get("lignes_excel", 0))),
+        )
+
+        result = {
+            "fichier": str(path),
+            "base_sqlite": str(db_path),
+            "lecture_seule": False,
+            "mode_base": "sqlite_rw_transaction",
+            "cle_correspondance": "siret_exact",
+            "creation_prospects": False,
+            "suppression_donnees": False,
+            "transaction_atomique": True,
+            "correspondances_siret": int(preview.get("correspondances_siret", 0)),
+            "introuvables": int(preview.get("introuvables", 0)),
+            "ambigus_siret": int(preview.get("ambigus_siret", 0)),
+            "sans_siret": int(preview.get("sans_siret", 0)),
+            "siret_invalides": int(preview.get("siret_invalides", 0)),
+            "ignores_incoherents": int(preview.get("ignores_incoherents", 0)),
+            "prospects_mis_a_jour": 0,
+            "informations_ajoutees": 0,
+            "champs_completes": 0,
+            "valeurs_fusionnees": 0,
+            "conflits_ignores": int(preview.get("conflits_a_verifier", 0)),
+        }
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        updated_ids = set()
+
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            available_columns = self._prospect_columns(conn)
+            if not available_columns or "id" not in available_columns or "siret" not in available_columns:
+                raise ValueError(
+                    "La table prospects est absente ou ne contient pas les colonnes id/SIRET requises."
+                )
+
+            readable = {"id", "siret"}
+            readable.update(
+                destination
+                for destination in self.DATABASE_FIELD_MAP.values()
+                if destination in available_columns
+            )
+            selected = ", ".join(f'"{column}"' for column in sorted(readable))
+
+            for item in preview.get("apercu") or []:
+                prospect_id = item.get("prospect_id")
+                if prospect_id is None:
+                    continue
+
+                db_row = conn.execute(
+                    f"SELECT {selected} FROM prospects WHERE id = ? LIMIT 1",
+                    (prospect_id,),
+                ).fetchone()
+                if db_row is None:
+                    continue
+
+                current = {column: db_row[column] for column in db_row.keys()}
+                updates: dict[str, str] = {}
+
+                grouped: dict[str, list[dict]] = {}
+                for diff in item.get("differences") or []:
+                    destination = str(diff.get("champ_destination") or "").strip()
+                    if not destination or destination not in available_columns:
+                        continue
+                    if diff.get("action") == "verifier":
+                        # Le conflit est volontairement conservé : pas
+                        # d'écrasement d'une donnée scalaire existante.
+                        continue
+                    grouped.setdefault(destination, []).append(diff)
+
+                for destination, differences in grouped.items():
+                    current_value = str(current.get(destination, "") or "").strip()
+
+                    incoming_values = []
+                    for diff in differences:
+                        incoming_values.extend(
+                            str(value).strip()
+                            for value in (diff.get("valeurs_excel") or [])
+                            if str(value).strip()
+                        )
+
+                    if not incoming_values:
+                        continue
+
+                    if destination in self.MERGE_FIELDS:
+                        merged, added_count = self._merge_additive_values(
+                            current_value,
+                            incoming_values,
+                            destination,
+                        )
+                        if added_count <= 0 or merged == current_value:
+                            continue
+                        updates[destination] = merged
+                        result["informations_ajoutees"] += added_count
+                        if current_value:
+                            result["valeurs_fusionnees"] += added_count
+                        else:
+                            result["champs_completes"] += 1
+                        continue
+
+                    # Champ scalaire : uniquement compléter un champ encore
+                    # vide. Une valeur existante n'est jamais remplacée.
+                    if current_value:
+                        continue
+                    incoming = incoming_values[0]
+                    if incoming:
+                        updates[destination] = incoming
+                        result["informations_ajoutees"] += 1
+                        result["champs_completes"] += 1
+
+                if not updates:
+                    continue
+
+                assignments = ", ".join(f'"{column}" = ?' for column in updates)
+                params = list(updates.values()) + [prospect_id]
+                conn.execute(
+                    f"UPDATE prospects SET {assignments} WHERE id = ?",
+                    params,
+                )
+                updated_ids.add(prospect_id)
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        result["prospects_mis_a_jour"] = len(updated_ids)
+        return result
+
+    def _merge_additive_values(
+        self,
+        current_value: str,
+        incoming_values: list[str],
+        field: str,
+    ) -> tuple[str, int]:
+        existing = self._split_multi_value(current_value, field)
+        result_values = list(existing)
+        seen = {
+            self._normaliser_contact_value(value, field)
+            for value in existing
+            if self._normaliser_contact_value(value, field)
+        }
+        added = 0
+
+        for raw in incoming_values:
+            for value in self._split_multi_value(raw, field):
+                normalized = self._normaliser_contact_value(value, field)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                result_values.append(value)
+                added += 1
+
+        return " ; ".join(result_values), added
 
     @staticmethod
     def _open_sqlite_read_only(database_path: Path) -> sqlite3.Connection:
@@ -648,6 +845,8 @@ class ProspectExcelUpdateService:
             return digits
         if field == "email":
             return text.casefold()
+        if field in {"site_web", "linkedin", "facebook", "instagram", "youtube"}:
+            return ProspectExcelUpdateService._normaliser_scalar(text, field)
         return text.casefold()
 
     @staticmethod

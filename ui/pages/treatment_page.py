@@ -33,7 +33,10 @@ from core.theme import (
 from services.enrichment_service import EnrichmentService
 from services.excel_service import ExcelService
 from services.import_service import ImportService
-from services.prospect_excel_preview_presenter import build_excel_update_preview_text
+from services.prospect_excel_preview_presenter import (
+    build_excel_update_preview_text,
+    build_excel_update_result_text,
+)
 from services.prospect_excel_update_service import ProspectExcelUpdateService
 from ui.components import InfoCard, MetricCard, SectionCard, StatCard, StatusBadge
 from ui.components.notifications import NotificationManager
@@ -157,8 +160,9 @@ class TreatmentPage(QWidget):
             f"font-size: 19px; font-weight: 900; color: {TEXT_PRIMARY};"
         )
         excel_update_subtitle = QLabel(
-            "Compare un fichier enrichi aux prospects existants par SIRET exact. "
-            "Cette étape est en lecture seule : aucun prospect créé et aucune donnée supprimée."
+            "Compare un fichier enrichi aux prospects existants par SIRET exact, "
+            "puis permet d'ajouter les nouvelles informations sans supprimer les anciennes. "
+            "Aucun prospect n'est créé automatiquement."
         )
         excel_update_subtitle.setWordWrap(True)
         excel_update_subtitle.setStyleSheet(
@@ -167,7 +171,7 @@ class TreatmentPage(QWidget):
         excel_update_header_text.addWidget(excel_update_title)
         excel_update_header_text.addWidget(excel_update_subtitle)
         self.excel_update_badge = StatusBadge("idle")
-        self.excel_update_badge.set_state("idle", "Lecture seule")
+        self.excel_update_badge.set_state("idle", "Prêt")
         excel_update_header.addLayout(excel_update_header_text, 1)
         excel_update_header.addWidget(self.excel_update_badge, 0, Qt.AlignTop)
         self.excel_update_card.content_layout.addLayout(excel_update_header)
@@ -188,21 +192,30 @@ class TreatmentPage(QWidget):
         self.bouton_analyser_mise_a_jour = QPushButton(
             "🔎 Analyser les mises à jour"
         )
+        self.bouton_appliquer_mise_a_jour = QPushButton(
+            "✅ Enrichir les prospects avec ce fichier"
+        )
         for button in (
             self.bouton_excel_mise_a_jour,
             self.bouton_analyser_mise_a_jour,
+            self.bouton_appliquer_mise_a_jour,
         ):
             button.setFixedHeight(44)
             button.setStyleSheet(primary_button_style())
         self.bouton_analyser_mise_a_jour.setEnabled(False)
+        self.bouton_appliquer_mise_a_jour.setEnabled(False)
         self.bouton_excel_mise_a_jour.clicked.connect(
             self.choisir_excel_mise_a_jour
         )
         self.bouton_analyser_mise_a_jour.clicked.connect(
             self.analyser_mise_a_jour_excel
         )
+        self.bouton_appliquer_mise_a_jour.clicked.connect(
+            self.appliquer_mise_a_jour_excel
+        )
         excel_update_actions.addWidget(self.bouton_excel_mise_a_jour)
         excel_update_actions.addWidget(self.bouton_analyser_mise_a_jour)
+        excel_update_actions.addWidget(self.bouton_appliquer_mise_a_jour)
         excel_update_actions.addStretch()
         self.excel_update_card.content_layout.addLayout(excel_update_actions)
 
@@ -437,6 +450,7 @@ class TreatmentPage(QWidget):
             self.bouton_aliases.setEnabled(False)
             self.bouton_excel_mise_a_jour.setEnabled(True)
             self.bouton_analyser_mise_a_jour.setEnabled(False)
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
             self.bouton_reenrichir_tout.setEnabled(False)
@@ -463,6 +477,7 @@ class TreatmentPage(QWidget):
             self.bouton_aliases.setEnabled(False)
             self.bouton_excel_mise_a_jour.setEnabled(True)
             self.bouton_analyser_mise_a_jour.setEnabled(False)
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
             self.excel_update_badge.set_state("idle", "Cloud : bientôt")
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
@@ -481,7 +496,8 @@ class TreatmentPage(QWidget):
             self.bouton_aliases.setEnabled(False)
             self.bouton_excel_mise_a_jour.setEnabled(True)
             self.bouton_analyser_mise_a_jour.setEnabled(False)
-            self.excel_update_badge.set_state("idle", "Lecture seule")
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
+            self.excel_update_badge.set_state("idle", "Prêt")
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
             self.bouton_reenrichir_tout.setEnabled(False)
@@ -506,7 +522,11 @@ class TreatmentPage(QWidget):
         self.bouton_analyser_mise_a_jour.setEnabled(
             bool(self.fichier_excel_mise_a_jour)
         )
-        self.excel_update_badge.set_state("idle", "Lecture seule")
+        self.bouton_appliquer_mise_a_jour.setEnabled(
+            self._excel_update_has_actions(self.excel_update_preview_stats)
+        )
+        if self.excel_update_preview_stats is None:
+            self.excel_update_badge.set_state("idle", "Prêt")
         self.bouton_test.setEnabled(remaining > 0)
         self.bouton_enrichir.setEnabled(remaining > 0)
         self.bouton_reenrichir_tout.setEnabled(total_reenrichissable > 0)
@@ -545,6 +565,7 @@ class TreatmentPage(QWidget):
             analyse = self.excel_update_service.analyser_fichier(file_path)
             self.fichier_excel_mise_a_jour = file_path
             self.excel_update_preview_stats = None
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
             self.label_fichier_mise_a_jour.setText(
                 f"Fichier enrichi : {analyse['nom_fichier']} — "
                 f"{analyse['lignes_excel']} ligne(s), "
@@ -563,6 +584,7 @@ class TreatmentPage(QWidget):
             self.fichier_excel_mise_a_jour = None
             self.excel_update_preview_stats = None
             self.bouton_analyser_mise_a_jour.setEnabled(False)
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
             self.excel_update_badge.set_state("error", "Fichier invalide")
             QMessageBox.critical(
                 self,
@@ -618,6 +640,9 @@ class TreatmentPage(QWidget):
             self.excel_update_preview.setPlainText(
                 build_excel_update_preview_text(stats, detail_limit=20)
             )
+            self.bouton_appliquer_mise_a_jour.setEnabled(
+                self._excel_update_has_actions(stats)
+            )
             self.excel_update_badge.set_state("success", "Aperçu prêt")
             self.log(
                 "📄 Excel : "
@@ -633,11 +658,127 @@ class TreatmentPage(QWidget):
             )
         except Exception as exc:
             self.excel_update_preview_stats = None
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
             self.excel_update_badge.set_state("error", "Erreur")
             QMessageBox.critical(
                 self,
                 "Erreur d'analyse Excel",
                 str(exc),
+            )
+
+    @staticmethod
+    def _excel_update_has_actions(stats) -> bool:
+        if not stats:
+            return False
+        return bool(
+            int(stats.get("champs_vides_a_completer", 0) or 0)
+            or int(stats.get("valeurs_a_fusionner", 0) or 0)
+        )
+
+    def appliquer_mise_a_jour_excel(self):
+        if not self.fichier_excel_mise_a_jour or not self.excel_update_preview_stats:
+            QMessageBox.warning(
+                self,
+                "Enrichissement Excel",
+                "Analysez d'abord le fichier Excel avant d'appliquer les ajouts.",
+            )
+            return
+
+        if not ApplicationState.has_project():
+            QMessageBox.warning(
+                self,
+                "Enrichissement Excel",
+                "Ouvrez d'abord un projet Form@Prospect.",
+            )
+            return
+
+        context = self.datasource_resolver.resolve()
+        if context.is_cloud:
+            QMessageBox.information(
+                self,
+                "Projet Cloud",
+                "L'écriture Excel Cloud sera ajoutée dans le lot Cloud dédié. "
+                "Aucune modification n'a été effectuée.",
+            )
+            return
+
+        project = context.project or ApplicationState.get_project()
+        if project is None:
+            QMessageBox.warning(
+                self,
+                "Enrichissement Excel",
+                "Aucun projet local actif n'est disponible.",
+            )
+            return
+
+        preview = self.excel_update_preview_stats
+        if not self._excel_update_has_actions(preview):
+            NotificationManager.info(
+                "Enrichissement Excel",
+                "Aucune nouvelle information n'est à ajouter.",
+            )
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Confirmer l'enrichissement Excel",
+            f"{preview.get('correspondances_siret', 0)} prospect(s) ont été retrouvés par SIRET exact.\n\n"
+            f"Champs vides à compléter : {preview.get('champs_vides_a_completer', 0)}\n"
+            f"Valeurs à fusionner : {preview.get('valeurs_a_fusionner', 0)}\n"
+            f"Conflits conservés sans écrasement : {preview.get('conflits_a_verifier', 0)}\n\n"
+            "Aucun prospect ne sera créé. Aucune ancienne donnée ne sera supprimée.\n\n"
+            "Voulez-vous appliquer ces ajouts ?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        if not self._create_recovery_point("excel_update", project):
+            return
+
+        try:
+            self.excel_update_badge.set_state("running", "Mise à jour")
+            self.bouton_appliquer_mise_a_jour.setEnabled(False)
+            result = self.excel_update_service.appliquer_mise_a_jour_sqlite(
+                self.fichier_excel_mise_a_jour,
+                project.database,
+            )
+            self.excel_update_preview.setPlainText(
+                build_excel_update_result_text(result)
+            )
+            self.excel_update_preview_stats = None
+            self.excel_update_badge.set_state("success", "Mise à jour terminée")
+            ActivityService.record(
+                "Enrichissement Excel appliqué",
+                f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour, "
+                f"{result.get('informations_ajoutees', 0)} information(s) ajoutée(s).",
+                category="enrichment",
+                level="success",
+                metadata=result,
+            )
+            self.log(
+                "✅ Excel : "
+                f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour, "
+                f"{result.get('informations_ajoutees', 0)} information(s) ajoutée(s), "
+                "0 donnée supprimée."
+            )
+            NotificationManager.success(
+                "Enrichissement Excel terminé",
+                f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour. "
+                "Aucune ancienne donnée n'a été supprimée.",
+            )
+        except Exception as exc:
+            self.excel_update_badge.set_state("error", "Erreur — rollback")
+            self.bouton_appliquer_mise_a_jour.setEnabled(
+                self._excel_update_has_actions(self.excel_update_preview_stats)
+            )
+            QMessageBox.critical(
+                self,
+                "Erreur de mise à jour Excel",
+                "La mise à jour a échoué. La transaction SQLite a été annulée.\n\n"
+                f"Détail : {exc}",
             )
 
     def _create_recovery_point(self, action: str, project) -> bool:
@@ -800,6 +941,7 @@ class TreatmentPage(QWidget):
             self.bouton_aliases,
             self.bouton_excel_mise_a_jour,
             self.bouton_analyser_mise_a_jour,
+            self.bouton_appliquer_mise_a_jour,
             self.bouton_test,
             self.bouton_enrichir,
             self.bouton_reenrichir_tout,
