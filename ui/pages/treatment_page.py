@@ -33,6 +33,7 @@ from core.theme import (
 from services.enrichment_service import EnrichmentService
 from services.excel_service import ExcelService
 from services.import_service import ImportService
+from services.cloud_runtime import CloudRuntime
 from services.prospect_excel_preview_presenter import (
     build_excel_update_preview_text,
     build_excel_update_result_text,
@@ -469,16 +470,22 @@ class TreatmentPage(QWidget):
                 f"Projet Cloud actif : {project_name}"
             )
             self.label_details.setText(
-                "Projet déjà déployé dans le Cloud. "
-                "Workflow : import local → enrichissement local → contrôle "
-                "→ déploiement vers le commercial."
+                "Projet Cloud actif. L'enrichissement par fichier Excel peut "
+                "être analysé par SIRET exact en lecture seule. "
+                "L'écriture Cloud reste désactivée dans ce lot."
             )
             self.bouton_importer.setEnabled(False)
             self.bouton_aliases.setEnabled(False)
             self.bouton_excel_mise_a_jour.setEnabled(True)
-            self.bouton_analyser_mise_a_jour.setEnabled(False)
+            self.bouton_analyser_mise_a_jour.setEnabled(
+                bool(self.fichier_excel_mise_a_jour)
+            )
             self.bouton_appliquer_mise_a_jour.setEnabled(False)
-            self.excel_update_badge.set_state("idle", "Cloud : bientôt")
+            if (
+                self.excel_update_preview_stats is None
+                or self.excel_update_preview_stats.get("mode_base") != "cloud_ro"
+            ):
+                self.excel_update_badge.set_state("idle", "Cloud prêt")
             self.bouton_test.setEnabled(False)
             self.bouton_enrichir.setEnabled(False)
             self.bouton_reenrichir_tout.setEnabled(False)
@@ -610,44 +617,49 @@ class TreatmentPage(QWidget):
             return
 
         context = self.datasource_resolver.resolve()
-        if context.is_cloud:
-            QMessageBox.information(
-                self,
-                "Projet Cloud",
-                "La comparaison Excel Cloud sera activée dans le prochain "
-                "lot dédié au Cloud. Ce lot reste volontairement en lecture "
-                "seule sur les projets locaux.",
-            )
-            return
-
-        project = context.project or ApplicationState.get_project()
-        if project is None:
-            QMessageBox.warning(
-                self,
-                "Enrichissement Excel",
-                "Aucun projet local actif n'est disponible.",
-            )
-            return
 
         try:
             self.excel_update_badge.set_state("running", "Analyse")
-            stats = self.excel_update_service.comparer_avec_sqlite(
-                self.fichier_excel_mise_a_jour,
-                project.database,
-                apercu_limite=100,
-            )
+            if context.is_cloud:
+                project_id = str(context.project_id or "").strip()
+                if not project_id:
+                    raise RuntimeError(
+                        "Le projet Cloud actif ne possède aucun identifiant valide."
+                    )
+                stats = self.excel_update_service.comparer_avec_cloud(
+                    self.fichier_excel_mise_a_jour,
+                    CloudRuntime.api(),
+                    project_id,
+                    apercu_limite=100,
+                )
+                apply_enabled = False
+                badge_text = "Aperçu Cloud prêt"
+                mode_label = "Cloud"
+            else:
+                project = context.project or ApplicationState.get_project()
+                if project is None:
+                    raise RuntimeError(
+                        "Aucun projet local actif n'est disponible."
+                    )
+                stats = self.excel_update_service.comparer_avec_sqlite(
+                    self.fichier_excel_mise_a_jour,
+                    project.database,
+                    apercu_limite=100,
+                )
+                apply_enabled = self._excel_update_has_actions(stats)
+                badge_text = "Aperçu prêt"
+                mode_label = "Local"
+
             self.excel_update_preview_stats = stats
             self.excel_update_preview.setPlainText(
                 build_excel_update_preview_text(stats, detail_limit=20)
             )
-            self.bouton_appliquer_mise_a_jour.setEnabled(
-                self._excel_update_has_actions(stats)
-            )
-            self.excel_update_badge.set_state("success", "Aperçu prêt")
+            self.bouton_appliquer_mise_a_jour.setEnabled(apply_enabled)
+            self.excel_update_badge.set_state("success", badge_text)
             self.log(
-                "📄 Excel : "
+                f"📄 Excel {mode_label} : "
                 f"{stats.get('correspondances_siret', 0)} prospect(s) "
-                "retrouvé(s) par SIRET, "
+                "retrouvé(s) par SIRET exact, "
                 f"{stats.get('introuvables', 0)} introuvable(s), "
                 "aucune écriture effectuée."
             )
