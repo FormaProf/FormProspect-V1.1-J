@@ -3,6 +3,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -32,6 +33,7 @@ from core.theme import (
     warning_button_style,
 )
 from services.enrichment_service import EnrichmentService
+from services.enrichment_method_service import EnrichmentMethodCatalog
 from services.excel_service import ExcelService
 from services.import_service import ImportService
 from services.cloud_runtime import CloudRuntime
@@ -57,6 +59,8 @@ class TreatmentPage(QWidget):
         self.import_service = ImportService()
         self.excel_update_service = ProspectExcelUpdateService()
         self.enrichment_service = EnrichmentService()
+        self.enrichment_method_catalog = EnrichmentMethodCatalog
+        self.enrichment_method_key = EnrichmentMethodCatalog.DEFAULT
         self.datasource_resolver = DataSourceResolver()
         self.recovery_manager = RecoveryManager()
 
@@ -261,6 +265,52 @@ class TreatmentPage(QWidget):
         control_header.addWidget(self.badge_state, 0, Qt.AlignTop)
         control_card.content_layout.addLayout(control_header)
 
+        method_row = QHBoxLayout()
+        method_row.setSpacing(12)
+        method_label = QLabel("Méthode")
+        method_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 900; color: {TEXT_PRIMARY};"
+        )
+        self.enrichment_method_combo = QComboBox()
+        self.enrichment_method_combo.setMinimumWidth(190)
+        self.enrichment_method_combo.setFixedHeight(42)
+        self.enrichment_method_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: #FFFFFF;
+                color: {TEXT_PRIMARY};
+                border: 1px solid #DCE4EE;
+                border-radius: 10px;
+                padding: 6px 12px;
+                font-size: 13px;
+                font-weight: 800;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 28px;
+            }}
+        """)
+        for profile in self.enrichment_method_catalog.profiles():
+            self.enrichment_method_combo.addItem(profile.label, profile.key)
+        default_index = self.enrichment_method_combo.findData(
+            EnrichmentMethodCatalog.DEFAULT
+        )
+        if default_index >= 0:
+            self.enrichment_method_combo.setCurrentIndex(default_index)
+        self.enrichment_method_description = QLabel(
+            self._selected_enrichment_profile().description
+        )
+        self.enrichment_method_description.setWordWrap(True)
+        self.enrichment_method_description.setStyleSheet(
+            f"font-size: 12px; color: {TEXT_SECONDARY};"
+        )
+        method_row.addWidget(method_label)
+        method_row.addWidget(self.enrichment_method_combo)
+        method_row.addWidget(self.enrichment_method_description, 1)
+        control_card.content_layout.addLayout(method_row)
+        self.enrichment_method_combo.currentIndexChanged.connect(
+            self._on_enrichment_method_changed
+        )
+
         enrichment_actions = QHBoxLayout()
         enrichment_actions.setSpacing(10)
         self.bouton_test = QPushButton(
@@ -427,6 +477,48 @@ class TreatmentPage(QWidget):
         self.page_scroll.setWidget(content)
         page_layout.addWidget(self.page_scroll)
 
+    def _selected_enrichment_profile(self):
+        key = getattr(self, "enrichment_method_key", EnrichmentMethodCatalog.DEFAULT)
+        combo = getattr(self, "enrichment_method_combo", None)
+        if combo is not None:
+            combo_key = combo.currentData()
+            if combo_key:
+                key = str(combo_key)
+        return self.enrichment_method_catalog.get(key)
+
+    def _on_enrichment_method_changed(self, _index=None):
+        profile = self._selected_enrichment_profile()
+        self.enrichment_method_key = profile.key
+        self.enrichment_method_description.setText(profile.description)
+
+        if profile.uses_excel:
+            self.excel_update_badge.set_state("idle", "Méthode Excel")
+            self.excel_update_preview.setFocus(Qt.OtherFocusReason)
+
+        if not self.enrichment_running:
+            self.rafraichir()
+
+    def _apply_enrichment_method_gate(self):
+        profile = self._selected_enrichment_profile()
+        self.enrichment_method_key = profile.key
+        self.enrichment_method_description.setText(profile.description)
+
+        if profile.engine_ready:
+            return
+
+        for button in (
+            self.bouton_test,
+            self.bouton_enrichir,
+            self.bouton_reenrichir_tout,
+            self.bouton_reessayer,
+        ):
+            button.setEnabled(False)
+
+        if profile.uses_excel:
+            self.badge_state.set_state("idle", "Mode Excel")
+        else:
+            self.badge_state.set_state("idle", "Profil à activer")
+
     @staticmethod
     def _format_duration(seconds):
         if seconds is None:
@@ -457,6 +549,7 @@ class TreatmentPage(QWidget):
             self.bouton_enrichir.setEnabled(False)
             self.bouton_reenrichir_tout.setEnabled(False)
             self.bouton_reessayer.setEnabled(False)
+            self._apply_enrichment_method_gate()
             return
 
         context = self.datasource_resolver.resolve()
@@ -497,6 +590,7 @@ class TreatmentPage(QWidget):
             self.bouton_enrichir.setEnabled(False)
             self.bouton_reenrichir_tout.setEnabled(False)
             self.bouton_reessayer.setEnabled(False)
+            self._apply_enrichment_method_gate()
             return
 
         project = context.project or ApplicationState.get_project()
@@ -516,6 +610,7 @@ class TreatmentPage(QWidget):
             self.bouton_enrichir.setEnabled(False)
             self.bouton_reenrichir_tout.setEnabled(False)
             self.bouton_reessayer.setEnabled(False)
+            self._apply_enrichment_method_gate()
             return
 
         remaining = self.enrichment_service.compter_a_enrichir(project.database)
@@ -550,6 +645,7 @@ class TreatmentPage(QWidget):
         self.bouton_enrichir.setEnabled(remaining > 0)
         self.bouton_reenrichir_tout.setEnabled(total_reenrichissable > 0)
         self.bouton_reessayer.setEnabled(without_result > 0)
+        self._apply_enrichment_method_gate()
 
     def choisir_excel(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1083,6 +1179,7 @@ class TreatmentPage(QWidget):
 
     def _set_enrichment_running(self, running):
         self.enrichment_running = running
+        self.enrichment_method_combo.setEnabled(not running)
         for button in (
             self.bouton_excel,
             self.bouton_importer,
@@ -1123,6 +1220,26 @@ class TreatmentPage(QWidget):
     ):
         if self.enrichment_running:
             return
+
+        profile = self._selected_enrichment_profile()
+        if profile.uses_excel:
+            QMessageBox.information(
+                self,
+                "Méthode Excel",
+                "Utilisez la carte « Enrichissement par fichier Excel » pour "
+                "analyser puis appliquer votre fichier enrichi.",
+            )
+            return
+        if not profile.engine_ready:
+            QMessageBox.information(
+                self,
+                "Méthode d'enrichissement",
+                f"Le profil {profile.label} est prêt dans l'interface mais son "
+                "moteur sera activé au prochain lot. Le mode Standard reste "
+                "le moteur actuel.",
+            )
+            return
+
         if not ApplicationState.has_project():
             QMessageBox.warning(self, "Attention", "Aucun projet actif.")
             return
