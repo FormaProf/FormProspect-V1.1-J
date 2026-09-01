@@ -8,6 +8,7 @@ from datetime import date
 
 from core.sqlite_utils import connect_database
 from modules.email_finder import EmailFinder
+from modules.annuaire_118000 import Annuaire118000Finder
 from modules.entreprise_api import EntrepriseApiClient
 from modules.google_maps import GoogleMapsFinder
 from modules.pages_jaunes import PagesJaunesFinder
@@ -30,6 +31,7 @@ class EnrichmentService:
         self.google = GoogleMapsFinder()
         self.pages_jaunes = PagesJaunesFinder()
         self.email_finder = EmailFinder()
+        self.annuaire_118000 = Annuaire118000Finder()
         self.social_finder = SocialFinder()
         self.entreprise_api = EntrepriseApiClient()
         self.web_fallback = WebFallbackFinder()
@@ -629,12 +631,19 @@ class EnrichmentService:
         return sorted(values, key=order)
 
     @classmethod
-    def _select_contact_numbers(cls, valid_results):
-        """Fusionne tous les numéros des sources validées, hors fax.
+    def _select_contact_numbers(cls, valid_results, trusted_existing=None):
+        """Conserve tous les numéros fiables, sauf les fax explicitement identifiés.
 
-        Le commercial doit pouvoir disposer de plusieurs standards / mobiles
-        lorsqu'ils sont publiés pour la même entreprise. Les fax explicitement
-        identifiés restent systématiquement exclus.
+        Une source déjà validée pour la bonne entreprise peut contribuer un
+        numéro même si aucune autre source ne publie le même numéro. Le moteur
+        ne demande donc plus de corroboration multi-source pour conserver une
+        ligne téléphonique.
+
+        En revanche, si n'importe quelle source validée qualifie explicitement
+        un numéro comme fax, ce numéro est exclu du champ téléphone/mobile.
+        Les doublons sont fusionnés. ``trusted_existing`` est accepté pour
+        compatibilité avec le pipeline SIREN mais ne sert jamais à supprimer un
+        nouveau numéro provenant d'une source validée.
         """
         ordered = sorted(
             valid_results or [],
@@ -650,26 +659,26 @@ class EnrichmentService:
                 if key:
                     fax_keys.add(key)
 
-        merged = []
-        sources = []
+        kept = []
+        kept_sources = []
         seen = set()
+
         for result in ordered:
-            source_has_phone = False
+            source = str(result.get("source") or "").strip()
+
             for raw in result.get("telephones") or []:
                 number = cls._normaliser_telephone(raw)
                 key = re.sub(r"\D", "", number)
                 if not key or key in fax_keys or key in seen:
                     continue
-                seen.add(key)
-                merged.append(number)
-                source_has_phone = True
-            if source_has_phone:
-                source = str(result.get("source") or "").strip()
-                if source and source not in sources:
-                    sources.append(source)
 
-        merged = cls._fusionner_telephones(merged)
-        return merged, " + ".join(sources)
+                seen.add(key)
+                kept.append(number)
+                if source and source not in kept_sources:
+                    kept_sources.append(source)
+
+        kept = cls._fusionner_telephones(kept)
+        return kept, " + ".join(kept_sources)
 
     @staticmethod
     def _valid(result):
@@ -703,6 +712,149 @@ class EnrichmentService:
             or str(result.get("site_web") or "").strip()
             or str(result.get("email") or "").strip()
         )
+
+    def _email_is_technical(self, email):
+        email = str(email or "").strip()
+        if not email:
+            return True
+        try:
+            return bool(self.email_finder._is_technical(email))
+        except Exception:
+            return False
+
+    @classmethod
+    def _email_is_reliable(cls, email, email_finder=None):
+        """Valide un email exploitable sans exiger un domaine professionnel.
+
+        Les boîtes grand public (Gmail, Outlook, Wanadoo, etc.) restent
+        acceptées lorsqu'elles proviennent d'une source dont l'identité de
+        l'entreprise a déjà été validée. En revanche les adresses techniques,
+        de tracking ou manifestement propres à un annuaire sont rejetées.
+        """
+        value = str(email or "").strip().lower()
+        if not value or not re.fullmatch(
+            r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}",
+            value,
+        ):
+            return False
+
+        if email_finder is not None:
+            try:
+                if email_finder._is_technical(value):
+                    return False
+            except Exception:
+                pass
+
+        blocked_domains = {
+            "118000.fr",
+            "allbiz.fr",
+            "cylex-locale.fr",
+            "pagesjaunes.fr",
+            "pappers.fr",
+            "societe.com",
+            "verif.com",
+            "manageo.fr",
+            "annuaire-entreprises.data.gouv.fr",
+            "google.com",
+            "google.fr",
+        }
+        domain = value.rsplit("@", 1)[-1].strip(".")
+        return not any(
+            domain == blocked or domain.endswith("." + blocked)
+            for blocked in blocked_domains
+        )
+
+    @classmethod
+    def _site_is_reliable(cls, site_web):
+        """Refuse les annuaires, moteurs et réseaux comme site officiel."""
+        key = cls._site_key(site_web)
+        if not key:
+            return False
+
+        blocked_domains = {
+            "118000.fr",
+            "118712.fr",
+            "allbiz.fr",
+            "cylex-locale.fr",
+            "pagesjaunes.fr",
+            "pappers.fr",
+            "societe.com",
+            "verif.com",
+            "manageo.fr",
+            "infogreffe.fr",
+            "annuaire-entreprises.data.gouv.fr",
+            "entreprises.lefigaro.fr",
+            "batico.fr",
+            "monartisan.info",
+            "le-site-de.com",
+            "google.com",
+            "google.fr",
+            "bing.com",
+            "duckduckgo.com",
+            "facebook.com",
+            "instagram.com",
+            "linkedin.com",
+            "youtube.com",
+            "twitter.com",
+            "x.com",
+            "tiktok.com",
+        }
+        return not any(
+            key == blocked or key.endswith("." + blocked)
+            for blocked in blocked_domains
+        )
+
+    @staticmethod
+    def _site_key(site_web):
+        value = str(site_web or "").strip().lower()
+        if not value:
+            return ""
+        value = re.sub(r"^https?://", "", value)
+        value = value.split("/", 1)[0].split(":", 1)[0].strip(".")
+        if value.startswith("www."):
+            value = value[4:]
+        return value
+
+    @classmethod
+    def _site_candidates(cls, valid_results, fallback_site="", limit=2):
+        """Retourne plusieurs sites validés distincts, classés par confiance.
+
+        Deux sources peuvent publier des domaines différents mais tous deux
+        rattachés à la même entreprise (site principal, marque ou ancien site).
+        On les analyse pour les emails/réseaux au lieu de s'arrêter au premier.
+        """
+        ordered = sorted(
+            valid_results or [],
+            key=lambda result: int(result.get("match_score") or 0),
+            reverse=True,
+        )
+        values = []
+        seen = set()
+        for result in ordered:
+            site = str(result.get("site_web") or "").strip()
+            key = cls._site_key(site)
+            if (
+                not site
+                or not key
+                or key in seen
+                or not cls._site_is_reliable(site)
+            ):
+                continue
+            seen.add(key)
+            values.append(site)
+            if len(values) >= max(1, int(limit or 1)):
+                return values
+
+        fallback = str(fallback_site or "").strip()
+        fallback_key = cls._site_key(fallback)
+        if (
+            fallback
+            and fallback_key
+            and fallback_key not in seen
+            and cls._site_is_reliable(fallback)
+        ):
+            values.append(fallback)
+        return values[: max(1, int(limit or 1))]
 
     @staticmethod
     def _has_useful_data(
@@ -1062,14 +1214,36 @@ class EnrichmentService:
                     )
                     has_site = any(result.get("site_web") for result in pre_valid)
 
-                    google_result = None
-                    if not pre_valid or not has_phone or not has_site:
-                        emit(
-                            index,
-                            entreprise,
-                            "Google Maps : recherche et contrôle d’identité...",
-                        )
+                    # Google Maps est une source complémentaire à part entière.
+                    # Même lorsque PagesJaunes a déjà trouvé un téléphone et un
+                    # site, Maps peut confirmer la donnée ou apporter un autre
+                    # site / numéro. Une panne de cette source optionnelle ne doit
+                    # pas invalider les résultats déjà fiables.
+                    emit(
+                        index,
+                        entreprise,
+                        "Google Maps : recherche complémentaire et contrôle d’identité...",
+                    )
+                    try:
                         google_result = await self.google.rechercher(identity)
+                    except Exception as google_exc:
+                        google_result = {
+                            "source": "google_maps",
+                            "source_detail": "",
+                            "nom": "",
+                            "adresse": "",
+                            "code_postal": "",
+                            "ville": "",
+                            "telephones": [],
+                            "faxes": [],
+                            "site_web": "",
+                            "email": "",
+                            "texte": "",
+                            "match_score": 0,
+                            "match_reasons": [],
+                            "confidence": "rejected",
+                            "technical_errors": [str(google_exc)],
+                        }
 
                     siren_reseaux = {
                         "facebook": siren_contacts.get("facebook", ""),
@@ -1087,27 +1261,80 @@ class EnrichmentService:
                         siren_reseaux,
                     )
 
-                    # Recherche web de secours uniquement si PagesJaunes + Maps
-                    # n'apportent aucune coordonnée et que le SIREN local n'a
-                    # rien à mutualiser. Cela limite fortement le coût du fallback.
-                    base_results = (pages_name_result, google_result)
-                    base_valid = [result for result in base_results if self._valid(result)]
-                    base_has_contact = any(
-                        self._result_has_contact(result) for result in base_valid
+                    # 118000 est interrogé directement sur les localisations
+                    # actuelles et historiques déjà validées par l'API Entreprises.
+                    # Cette source complète les autres sans court-circuiter le reste
+                    # du pipeline.
+                    emit(
+                        index,
+                        entreprise,
+                        "118000 : recherche complémentaire sur les implantations connues...",
                     )
-                    web_result = None
-                    if not base_has_contact and not has_siren_contacts:
-                        emit(
-                            index,
-                            entreprise,
-                            "Recherche web de secours : annuaires / site officiel...",
+                    try:
+                        annuaire_118000_result = await asyncio.to_thread(
+                            self.annuaire_118000.rechercher,
+                            identity,
                         )
+                    except Exception as annuaire_exc:
+                        annuaire_118000_result = {
+                            "source": "118000",
+                            "source_detail": "",
+                            "nom": "",
+                            "adresse": "",
+                            "code_postal": "",
+                            "ville": "",
+                            "telephones": [],
+                            "faxes": [],
+                            "site_web": "",
+                            "email": "",
+                            "texte": "",
+                            "match_score": 0,
+                            "match_reasons": [],
+                            "confidence": "rejected",
+                            "technical_errors": [str(annuaire_exc)],
+                        }
+
+                    # La recherche web est une source complémentaire, et non plus
+                    # un simple dernier recours. Même lorsqu'un téléphone est déjà
+                    # trouvé via PagesJaunes / Maps ou mutualisé par SIREN, elle peut
+                    # encore apporter un second numéro, un email ou un site officiel.
+                    # Une panne de cette source optionnelle ne doit toutefois jamais
+                    # invalider les coordonnées fiables déjà obtenues ailleurs.
+                    emit(
+                        index,
+                        entreprise,
+                        "Recherche web complémentaire : annuaires / site officiel / contacts...",
+                    )
+                    try:
                         web_result = await asyncio.to_thread(
                             self.web_fallback.rechercher,
                             identity,
                         )
+                    except Exception as web_exc:
+                        web_result = {
+                            "source": "web_fallback",
+                            "source_detail": "",
+                            "nom": "",
+                            "adresse": "",
+                            "code_postal": "",
+                            "ville": "",
+                            "telephones": [],
+                            "faxes": [],
+                            "site_web": "",
+                            "email": "",
+                            "texte": "",
+                            "match_score": 0,
+                            "match_reasons": [],
+                            "confidence": "rejected",
+                            "technical_errors": [str(web_exc)],
+                        }
 
-                    all_results = (pages_name_result, google_result, web_result)
+                    all_results = (
+                        pages_name_result,
+                        google_result,
+                        annuaire_118000_result,
+                        web_result,
+                    )
                     valid = [result for result in all_results if self._valid(result)]
 
                     if not valid:
@@ -1157,11 +1384,17 @@ class EnrichmentService:
                         reverse=True,
                     )
 
-                    web_phones, phone_source = self._select_contact_numbers(valid)
-                    phones = self._fusionner_telephones(
-                        web_phones,
+                    trusted_siren_numbers = self._fusionner_telephones(
                         siren_contacts.get("phones") or [],
                         siren_contacts.get("mobiles") or [],
+                    )
+                    web_phones, phone_source = self._select_contact_numbers(
+                        valid,
+                        trusted_existing=trusted_siren_numbers,
+                    )
+                    phones = self._fusionner_telephones(
+                        web_phones,
+                        trusted_siren_numbers,
                     )
                     if has_siren_contacts:
                         phone_source = (
@@ -1179,46 +1412,65 @@ class EnrichmentService:
                     telephone = " / ".join(fixed_phones)
                     mobile = " / ".join(mobile_phones)
 
-                    site_web = next(
-                        (
-                            result.get("site_web")
-                            for result in valid
-                            if result.get("site_web")
-                        ),
-                        "",
-                    ) or siren_contacts.get("site_web", "")
+                    sites = self._site_candidates(
+                        valid,
+                        siren_contacts.get("site_web", ""),
+                        limit=2,
+                    )
+                    site_web = sites[0] if sites else ""
 
                     email = next(
                         (
                             str(result.get("email") or "").strip()
                             for result in valid
                             if str(result.get("email") or "").strip()
+                            and self._email_is_reliable(
+                                result.get("email"),
+                                self.email_finder,
+                            )
                         ),
                         "",
-                    ) or siren_contacts.get("email", "")
+                    )
+                    if not email:
+                        inherited_email = str(siren_contacts.get("email", "") or "").strip()
+                        if self._email_is_reliable(
+                            inherited_email,
+                            self.email_finder,
+                        ):
+                            email = inherited_email
+
                     reseaux = dict(siren_reseaux)
 
-                    if site_web:
+                    if sites:
                         emit(
                             index,
                             entreprise,
-                            "Site validé / mutualisé : recherche email et réseaux sociaux...",
+                            f"{len(sites)} site(s) validé(s) : recherche email et réseaux sociaux...",
                         )
+
+                    for candidate_site in sites:
                         found_email = await asyncio.to_thread(
                             self.email_finder.chercher,
-                            site_web,
+                            candidate_site,
                         )
-                        if found_email:
+                        if (
+                            found_email
+                            and self._email_is_reliable(
+                                found_email,
+                                self.email_finder,
+                            )
+                            and not email
+                        ):
                             email = found_email
 
                         found_socials = await asyncio.to_thread(
                             self.social_finder.chercher,
-                            site_web,
+                            candidate_site,
                         )
                         for key in (
                             "facebook", "linkedin", "instagram", "twitter", "youtube"
                         ):
-                            if found_socials.get(key):
+                            if found_socials.get(key) and not reseaux.get(key):
                                 reseaux[key] = found_socials.get(key)
                         for url in found_socials.get("other_urls") or []:
                             if url and url not in reseaux["other_urls"]:

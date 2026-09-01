@@ -11,17 +11,21 @@ import requests
 class EntrepriseApiClient:
     """Résout un SIREN/SIRET via l'API Recherche d'entreprises.
 
-    Lot 2.3 : cette source ne fournit pas directement les téléphones/emails.
-    Elle sert à compléter l'identité avec le siège, les autres établissements,
-    les enseignes et le sigle avant d'interroger PagesJaunes / Google Maps.
+    Cette source ne fournit pas directement les téléphones/emails. Elle sert à
+    consolider l'identité avant les recherches de coordonnées : raison sociale,
+    enseignes, siège actuel et, lorsque l'API le permet, établissements anciens
+    ou secondaires appartenant à la même unité légale.
 
-    L'API est ouverte mais limitée en débit. On conserve donc un cache mémoire
-    par SIREN et on espace légèrement les appels réseau réels.
+    L'API est ouverte mais limitée en débit. Un cache mémoire par SIREN évite de
+    répéter les deux requêtes d'identité pour plusieurs établissements d'une
+    même société.
     """
 
     SEARCH_URL = "https://recherche-entreprises.api.gouv.fr/search"
     MIN_REQUEST_INTERVAL = 0.18  # < 7 req/s, avec une petite marge.
     TIMEOUT = 5
+    HISTORY_MATCH_LIMIT = 100
+    HISTORY_RESULT_LIMIT = 25
 
     def __init__(self):
         self.session = requests.Session()
@@ -64,7 +68,10 @@ class EntrepriseApiClient:
                 target.append(value)
 
     @classmethod
-    def _location_from_etablissement(cls, etab: dict[str, Any]) -> dict[str, str] | None:
+    def _location_from_etablissement(
+        cls,
+        etab: dict[str, Any],
+    ) -> dict[str, Any] | None:
         if not isinstance(etab, dict):
             return None
         adresse = cls._clean_text(etab.get("adresse") or etab.get("geo_adresse"))
@@ -120,7 +127,7 @@ class EntrepriseApiClient:
             result.get("sigle"),
         )
 
-        locations: list[dict[str, str]] = []
+        locations: list[dict[str, Any]] = []
         seen_locations = set()
 
         def consume_etab(etab: dict[str, Any]) -> None:
@@ -136,9 +143,9 @@ class EntrepriseApiClient:
                 return
             key = (
                 location.get("siret", ""),
-                location.get("adresse", "").lower(),
+                str(location.get("adresse", "")).lower(),
                 location.get("code_postal", ""),
-                location.get("ville", "").lower(),
+                str(location.get("ville", "")).lower(),
             )
             if key not in seen_locations:
                 seen_locations.add(key)
@@ -160,6 +167,143 @@ class EntrepriseApiClient:
             "from_cache": False,
         }
 
+    @classmethod
+    def _merge_parsed(
+        cls,
+        primary: dict[str, Any],
+        extra: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Fusionne deux résolutions déjà filtrées sur le même SIREN."""
+        merged = {
+            "resolved": bool(primary.get("resolved") or extra.get("resolved")),
+            "siren": str(primary.get("siren") or extra.get("siren") or ""),
+            "siret_siege": str(
+                primary.get("siret_siege") or extra.get("siret_siege") or ""
+            ),
+            "names": list(primary.get("names") or []),
+            "locations": [dict(item) for item in primary.get("locations") or []],
+            "error": "",
+            "from_cache": False,
+        }
+
+        cls._append_unique(merged["names"], *(extra.get("names") or []))
+
+        seen_sirets = {
+            cls._digits(item.get("siret"))
+            for item in merged["locations"]
+            if cls._digits(item.get("siret"))
+        }
+        seen_locations = {
+            (
+                str(item.get("adresse") or "").strip().lower(),
+                str(item.get("code_postal") or "").strip(),
+                str(item.get("ville") or "").strip().lower(),
+            )
+            for item in merged["locations"]
+        }
+
+        for raw in extra.get("locations") or []:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            item_siret = cls._digits(item.get("siret"))
+            location_key = (
+                str(item.get("adresse") or "").strip().lower(),
+                str(item.get("code_postal") or "").strip(),
+                str(item.get("ville") or "").strip().lower(),
+            )
+            if item_siret and item_siret in seen_sirets:
+                continue
+            if any(location_key) and location_key in seen_locations:
+                continue
+            if item_siret:
+                seen_sirets.add(item_siret)
+            if any(location_key):
+                seen_locations.add(location_key)
+            merged["locations"].append(item)
+
+        return merged
+
+    @staticmethod
+    def _needs_history_expansion(
+        raw_result: dict[str, Any],
+        parsed: dict[str, Any],
+    ) -> bool:
+        """Détermine si une recherche textuelle peut apporter des établissements.
+
+        Une recherche directe par SIREN peut ne retourner que le siège courant.
+        On déclenche alors une seconde recherche par nom. Si la première réponse
+        contient déjà des ``matching_etablissements``, on évite l'appel réseau
+        supplémentaire afin de conserver les performances et la compatibilité.
+        """
+        matching = raw_result.get("matching_etablissements") or []
+
+        try:
+            declared_count = int(raw_result.get("nombre_etablissements") or 0)
+        except Exception:
+            declared_count = 0
+
+        known_count = len(parsed.get("locations") or [])
+
+        # Le compteur déclaré par l'API est l'indicateur le plus fiable : même
+        # si la réponse directe contient un matching_etablissements partiel, on
+        # complète lorsque le nombre d'implantations connues reste inférieur.
+        if declared_count > 1:
+            return declared_count > known_count
+
+        # Compatibilité avec les réponses/tests plus anciens qui n'exposent pas
+        # nombre_etablissements : si des établissements sont déjà présents, on
+        # considère la première résolution suffisante et on évite un second appel.
+        if matching:
+            return False
+
+        return False
+
+    def _request_results(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Exécute une requête API avec throttle et un retry court sur HTTP 429."""
+        self._throttle()
+        response = self.session.get(
+            self.SEARCH_URL,
+            params=params,
+            timeout=self.TIMEOUT,
+        )
+        self.network_requests += 1
+
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            try:
+                delay = min(2.0, max(0.2, float(retry_after)))
+            except Exception:
+                delay = 0.5
+            time.sleep(delay)
+            self._throttle()
+            response = self.session.get(
+                self.SEARCH_URL,
+                params=params,
+                timeout=self.TIMEOUT,
+            )
+            self.network_requests += 1
+
+        response.raise_for_status()
+        payload = response.json()
+        results = payload.get("results") or []
+        return [item for item in results if isinstance(item, dict)]
+
+    def _history_query_name(
+        self,
+        identity: dict[str, Any],
+        parsed: dict[str, Any],
+    ) -> str:
+        candidates = [
+            identity.get("entreprise"),
+            *(parsed.get("names") or []),
+        ]
+        for value in candidates:
+            text = self._clean_text(value)
+            if text:
+                return text
+        return ""
+
     def resolve(self, identity: dict[str, Any]) -> dict[str, Any]:
         siren = self._digits(identity.get("siren"))
         siret = self._digits(identity.get("siret"))
@@ -171,47 +315,21 @@ class EntrepriseApiClient:
         if siren in self._cache:
             self.cache_hits += 1
             cached = dict(self._cache[siren])
+            cached["names"] = list(cached.get("names") or [])
+            cached["locations"] = [dict(x) for x in cached.get("locations") or []]
             cached["from_cache"] = True
             return cached
 
-        self._throttle()
+        primary_params = {
+            "q": siren,
+            "minimal": "true",
+            "include": "siege,matching_etablissements",
+            "limite_matching_etablissements": self.HISTORY_MATCH_LIMIT,
+            "per_page": 1,
+        }
+
         try:
-            response = self.session.get(
-                self.SEARCH_URL,
-                params={
-                    "q": siren,
-                    "minimal": "true",
-                    "include": "siege,matching_etablissements",
-                    "limite_matching_etablissements": 100,
-                    "per_page": 1,
-                },
-                timeout=self.TIMEOUT,
-            )
-            self.network_requests += 1
-
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                try:
-                    delay = min(2.0, max(0.2, float(retry_after)))
-                except Exception:
-                    delay = 0.5
-                time.sleep(delay)
-                response = self.session.get(
-                    self.SEARCH_URL,
-                    params={
-                        "q": siren,
-                        "minimal": "true",
-                        "include": "siege,matching_etablissements",
-                        "limite_matching_etablissements": 100,
-                        "per_page": 1,
-                    },
-                    timeout=self.TIMEOUT,
-                )
-                self.network_requests += 1
-
-            response.raise_for_status()
-            payload = response.json()
-            results = payload.get("results") or []
+            results = self._request_results(primary_params)
             exact = next(
                 (
                     item
@@ -220,15 +338,59 @@ class EntrepriseApiClient:
                 ),
                 None,
             )
-            parsed = self._parse_result(exact or {}, siren)
-            self._cache[siren] = dict(parsed)
-            return parsed
+            if not exact:
+                parsed = self._empty()
+                self._cache[siren] = dict(parsed)
+                return parsed
+
+            parsed = self._parse_result(exact, siren)
         except Exception as exc:
             self.failures += 1
-            result = self._empty(error=f"{type(exc).__name__}: {exc}")
             # On ne mémorise pas durablement un échec réseau : un autre SIRET
             # du même SIREN pourra retenter l'appel plus tard dans la session.
-            return result
+            return self._empty(error=f"{type(exc).__name__}: {exc}")
+
+        # La recherche directe par SIREN peut ne présenter que le siège. Lorsque
+        # l'API annonce davantage d'établissements, une recherche textuelle par
+        # nom permet de récupérer matching_etablissements, y compris fermés.
+        if self._needs_history_expansion(exact, parsed):
+            history_name = self._history_query_name(identity, parsed)
+            if history_name:
+                history_params = {
+                    "q": history_name,
+                    "page": 1,
+                    "per_page": self.HISTORY_RESULT_LIMIT,
+                    "limite_matching_etablissements": self.HISTORY_MATCH_LIMIT,
+                }
+                try:
+                    history_results = self._request_results(history_params)
+                    history_exact = next(
+                        (
+                            item
+                            for item in history_results
+                            if self._digits((item or {}).get("siren")) == siren
+                        ),
+                        None,
+                    )
+                    if history_exact:
+                        history_parsed = self._parse_result(history_exact, siren)
+                        parsed = self._merge_parsed(parsed, history_parsed)
+                except Exception:
+                    # Cette seconde passe est un enrichissement optionnel. Une
+                    # panne ne doit jamais annuler l'identité actuelle déjà
+                    # résolue ni marquer le résultat principal comme en erreur.
+                    pass
+
+        cached = dict(parsed)
+        cached["names"] = list(parsed.get("names") or [])
+        cached["locations"] = [dict(x) for x in parsed.get("locations") or []]
+        cached["from_cache"] = False
+        self._cache[siren] = cached
+
+        result = dict(cached)
+        result["names"] = list(cached.get("names") or [])
+        result["locations"] = [dict(x) for x in cached.get("locations") or []]
+        return result
 
     def stats(self) -> dict[str, int]:
         return {
