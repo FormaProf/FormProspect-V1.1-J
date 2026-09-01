@@ -33,7 +33,10 @@ from core.theme import (
     warning_button_style,
 )
 from services.enrichment_service import EnrichmentService
-from services.enrichment_method_service import EnrichmentMethodCatalog
+from services.enrichment_method_service import (
+    EnrichmentMethodCatalog,
+    EnrichmentMethodRuntime,
+)
 from services.excel_service import ExcelService
 from services.import_service import ImportService
 from services.cloud_runtime import CloudRuntime
@@ -1308,6 +1311,11 @@ class TreatmentPage(QWidget):
         if not self._create_recovery_point("enrichment", project):
             return
 
+        # Le Worker Qt existant conserve son constructeur historique. La méthode
+        # sélectionnée est publiée juste avant le démarrage du thread ; le moteur
+        # EnrichmentService la lit au début de son exécution.
+        EnrichmentMethodRuntime.activate(profile.key)
+
         self._reset_dashboard(total_expected)
         self.enrichment_thread = QThread(self)
         self.enrichment_worker = EnrichmentWorker(
@@ -1336,10 +1344,15 @@ class TreatmentPage(QWidget):
             f"{mode_label} prévu sur {total_expected} prospect(s).",
             category="enrichment",
             level="info",
-            metadata={"total": total_expected, "mode": mode},
+            metadata={
+                "total": total_expected,
+                "mode": mode,
+                "enrichment_method": profile.key,
+            },
         )
         self.log(
-            f"🚀 Démarrage : {mode_label} sur {total_expected} prospect(s)."
+            f"🚀 Démarrage {profile.label} : {mode_label} sur "
+            f"{total_expected} prospect(s)."
         )
         self.enrichment_thread.start()
 

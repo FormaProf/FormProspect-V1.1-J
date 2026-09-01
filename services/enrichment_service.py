@@ -14,6 +14,10 @@ from modules.google_maps import GoogleMapsFinder
 from modules.pages_jaunes import PagesJaunesFinder
 from modules.social_finder import SocialFinder
 from modules.web_fallback import WebFallbackFinder
+from services.enrichment_method_service import (
+    EnrichmentMethodCatalog,
+    EnrichmentMethodRuntime,
+)
 from services.scoring_service import ScoringService
 
 
@@ -713,6 +717,59 @@ class EnrichmentService:
             or str(result.get("email") or "").strip()
         )
 
+    @staticmethod
+    def _empty_source_result(source, *, source_detail="strategy_skipped"):
+        return {
+            "source": source,
+            "source_detail": source_detail,
+            "nom": "",
+            "adresse": "",
+            "code_postal": "",
+            "ville": "",
+            "telephones": [],
+            "faxes": [],
+            "site_web": "",
+            "email": "",
+            "texte": "",
+            "match_score": 0,
+            "match_reasons": [],
+            "confidence": "rejected",
+            "technical_errors": [],
+        }
+
+    @classmethod
+    def _results_have_phone(cls, results, inherited_numbers=None):
+        if cls._fusionner_telephones(inherited_numbers or []):
+            return True
+        return any(
+            cls._valid(result) and bool(result.get("telephones"))
+            for result in (results or [])
+        )
+
+    @classmethod
+    def _results_have_useful_contact(cls, results, inherited=None):
+        inherited = inherited or {}
+        inherited_reseaux = {
+            "facebook": inherited.get("facebook", ""),
+            "linkedin": inherited.get("linkedin", ""),
+            "instagram": inherited.get("instagram", ""),
+            "twitter": inherited.get("twitter", ""),
+            "youtube": inherited.get("youtube", ""),
+            "other_urls": list(inherited.get("other_urls") or []),
+        }
+        if cls._has_useful_data(
+            " / ".join(inherited.get("phones") or []),
+            " / ".join(inherited.get("mobiles") or []),
+            inherited.get("site_web", ""),
+            inherited.get("email", ""),
+            inherited_reseaux,
+        ):
+            return True
+        return any(
+            cls._valid(result) and cls._result_has_contact(result)
+            for result in (results or [])
+        )
+
     def _email_is_technical(self, email):
         email = str(email or "").strip()
         if not email:
@@ -1014,6 +1071,7 @@ class EnrichmentService:
         wait_if_paused=None,
         mode=MODE_PENDING,
         prospect_ids=None,
+        strategy=None,
     ):
         """Entrée synchrone conservée pour le Worker Qt."""
         return asyncio.run(
@@ -1025,6 +1083,7 @@ class EnrichmentService:
                 wait_if_paused=wait_if_paused,
                 mode=mode,
                 prospect_ids=prospect_ids,
+                strategy=strategy,
             )
         )
 
@@ -1037,8 +1096,18 @@ class EnrichmentService:
         wait_if_paused=None,
         mode=MODE_PENDING,
         prospect_ids=None,
+        strategy=None,
     ):
         mode = self._valider_mode(mode)
+        strategy_profile = (
+            EnrichmentMethodCatalog.get(strategy)
+            if strategy is not None
+            else EnrichmentMethodRuntime.active_profile()
+        )
+        if strategy_profile.uses_excel or not strategy_profile.engine_ready:
+            raise ValueError(
+                f"Méthode incompatible avec le moteur web : {strategy_profile.key}"
+            )
         remplacer = mode in {self.MODE_SELECTED, self.MODE_ALL}
 
         conn = connect_database(database_path)
@@ -1117,6 +1186,7 @@ class EnrichmentService:
                 "sans_resultat": 0,
                 "erreurs": 0,
                 "interrompu": False,
+                "enrichment_method": strategy_profile.key,
                 **compteurs,
                 **api_run_stats(),
                 "elapsed_seconds": 0.0,
@@ -1209,41 +1279,6 @@ class EnrichmentService:
                         for result in (pages_name_result,)
                         if self._valid(result)
                     ]
-                    has_phone = any(
-                        result.get("telephones") for result in pre_valid
-                    )
-                    has_site = any(result.get("site_web") for result in pre_valid)
-
-                    # Google Maps est une source complémentaire à part entière.
-                    # Même lorsque PagesJaunes a déjà trouvé un téléphone et un
-                    # site, Maps peut confirmer la donnée ou apporter un autre
-                    # site / numéro. Une panne de cette source optionnelle ne doit
-                    # pas invalider les résultats déjà fiables.
-                    emit(
-                        index,
-                        entreprise,
-                        "Google Maps : recherche complémentaire et contrôle d’identité...",
-                    )
-                    try:
-                        google_result = await self.google.rechercher(identity)
-                    except Exception as google_exc:
-                        google_result = {
-                            "source": "google_maps",
-                            "source_detail": "",
-                            "nom": "",
-                            "adresse": "",
-                            "code_postal": "",
-                            "ville": "",
-                            "telephones": [],
-                            "faxes": [],
-                            "site_web": "",
-                            "email": "",
-                            "texte": "",
-                            "match_score": 0,
-                            "match_reasons": [],
-                            "confidence": "rejected",
-                            "technical_errors": [str(google_exc)],
-                        }
 
                     siren_reseaux = {
                         "facebook": siren_contacts.get("facebook", ""),
@@ -1261,73 +1296,117 @@ class EnrichmentService:
                         siren_reseaux,
                     )
 
-                    # 118000 est interrogé directement sur les localisations
-                    # actuelles et historiques déjà validées par l'API Entreprises.
-                    # Cette source complète les autres sans court-circuiter le reste
-                    # du pipeline.
-                    emit(
-                        index,
-                        entreprise,
-                        "118000 : recherche complémentaire sur les implantations connues...",
-                    )
-                    try:
-                        annuaire_118000_result = await asyncio.to_thread(
-                            self.annuaire_118000.rechercher,
-                            identity,
+                    # Standard / Approfondi conservent exactement l'appel Maps
+                    # systématique d'E6. Rapide peut l'éviter lorsqu'une donnée
+                    # exploitable est déjà disponible via PagesJaunes ou SIREN.
+                    run_google = strategy_profile.should_run_google(
+                        has_useful=self._results_have_useful_contact(
+                            pre_valid,
+                            siren_contacts,
                         )
-                    except Exception as annuaire_exc:
-                        annuaire_118000_result = {
-                            "source": "118000",
-                            "source_detail": "",
-                            "nom": "",
-                            "adresse": "",
-                            "code_postal": "",
-                            "ville": "",
-                            "telephones": [],
-                            "faxes": [],
-                            "site_web": "",
-                            "email": "",
-                            "texte": "",
-                            "match_score": 0,
-                            "match_reasons": [],
-                            "confidence": "rejected",
-                            "technical_errors": [str(annuaire_exc)],
-                        }
+                    )
+                    if run_google:
+                        emit(
+                            index,
+                            entreprise,
+                            "Google Maps : recherche complémentaire et contrôle d’identité...",
+                        )
+                        try:
+                            google_result = await self.google.rechercher(identity)
+                        except Exception as google_exc:
+                            google_result = self._empty_source_result(
+                                "google_maps",
+                                source_detail="",
+                            )
+                            google_result["technical_errors"] = [str(google_exc)]
+                    else:
+                        google_result = self._empty_source_result("google_maps")
+                        emit(
+                            index,
+                            entreprise,
+                            "⚡ Rapide : Google Maps non nécessaire, une donnée fiable est déjà disponible.",
+                        )
 
-                    # La recherche web est une source complémentaire, et non plus
-                    # un simple dernier recours. Même lorsqu'un téléphone est déjà
-                    # trouvé via PagesJaunes / Maps ou mutualisé par SIREN, elle peut
-                    # encore apporter un second numéro, un email ou un site officiel.
-                    # Une panne de cette source optionnelle ne doit toutefois jamais
-                    # invalider les coordonnées fiables déjà obtenues ailleurs.
-                    emit(
-                        index,
-                        entreprise,
-                        "Recherche web complémentaire : annuaires / site officiel / contacts...",
+                    direct_results = [pages_name_result, google_result]
+                    inherited_numbers = self._fusionner_telephones(
+                        siren_contacts.get("phones") or [],
+                        siren_contacts.get("mobiles") or [],
                     )
-                    try:
-                        web_result = await asyncio.to_thread(
-                            self.web_fallback.rechercher,
-                            identity,
+                    run_118000 = strategy_profile.should_run_118000(
+                        has_phone=self._results_have_phone(
+                            direct_results,
+                            inherited_numbers=inherited_numbers,
                         )
-                    except Exception as web_exc:
-                        web_result = {
-                            "source": "web_fallback",
-                            "source_detail": "",
-                            "nom": "",
-                            "adresse": "",
-                            "code_postal": "",
-                            "ville": "",
-                            "telephones": [],
-                            "faxes": [],
-                            "site_web": "",
-                            "email": "",
-                            "texte": "",
-                            "match_score": 0,
-                            "match_reasons": [],
-                            "confidence": "rejected",
-                            "technical_errors": [str(web_exc)],
-                        }
+                    )
+
+                    # Standard / Approfondi interrogent toujours 118000 comme E6.
+                    # Rapide ne le sollicite que si aucun téléphone fiable n'est
+                    # encore disponible après les sources prioritaires.
+                    if run_118000:
+                        emit(
+                            index,
+                            entreprise,
+                            "118000 : recherche complémentaire sur les implantations connues...",
+                        )
+                        try:
+                            annuaire_118000_result = await asyncio.to_thread(
+                                self.annuaire_118000.rechercher,
+                                identity,
+                            )
+                        except Exception as annuaire_exc:
+                            annuaire_118000_result = self._empty_source_result(
+                                "118000",
+                                source_detail="",
+                            )
+                            annuaire_118000_result["technical_errors"] = [
+                                str(annuaire_exc)
+                            ]
+                    else:
+                        annuaire_118000_result = self._empty_source_result("118000")
+                        emit(
+                            index,
+                            entreprise,
+                            "⚡ Rapide : 118000 ignoré, un téléphone fiable est déjà disponible.",
+                        )
+
+                    results_before_web = [
+                        pages_name_result,
+                        google_result,
+                        annuaire_118000_result,
+                    ]
+                    run_web = strategy_profile.should_run_web(
+                        has_useful=self._results_have_useful_contact(
+                            results_before_web,
+                            siren_contacts,
+                        )
+                    )
+
+                    # WebFallback reste complémentaire systématique en Standard et
+                    # Approfondi. En Rapide il devient un vrai dernier recours.
+                    if run_web:
+                        emit(
+                            index,
+                            entreprise,
+                            "Recherche web complémentaire : annuaires / site officiel / contacts...",
+                        )
+                        try:
+                            web_result = await asyncio.to_thread(
+                                self.web_fallback.rechercher,
+                                identity,
+                            )
+                        except Exception as web_exc:
+                            web_result = self._empty_source_result(
+                                "web_fallback",
+                                source_detail="",
+                            )
+                            web_result["technical_errors"] = [str(web_exc)]
+                    else:
+                        web_result = self._empty_source_result("web_fallback")
+                        emit(
+                            index,
+                            entreprise,
+                            "⚡ Rapide : recherche web ignorée, les sources directes ont déjà fourni une donnée fiable.",
+                        )
 
                     all_results = (
                         pages_name_result,
@@ -1415,7 +1494,7 @@ class EnrichmentService:
                     sites = self._site_candidates(
                         valid,
                         siren_contacts.get("site_web", ""),
-                        limit=2,
+                        limit=strategy_profile.site_analysis_limit,
                     )
                     site_web = sites[0] if sites else ""
 
@@ -1612,6 +1691,7 @@ class EnrichmentService:
             "sans_resultat": sans_resultat,
             "erreurs": erreurs,
             "interrompu": interrompu,
+            "enrichment_method": strategy_profile.key,
             **compteurs,
             **api_run_stats(),
             "elapsed_seconds": max(0.0, time.monotonic() - started_at),
