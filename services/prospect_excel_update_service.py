@@ -465,6 +465,199 @@ class ProspectExcelUpdateService:
 
         return stats
 
+    def comparer_avec_cloud(
+        self,
+        fichier_excel,
+        cloud_client,
+        project_id: str,
+        *,
+        apercu_limite: int = 100,
+        page_size: int = 500,
+    ) -> dict:
+        """Compare un fichier Excel avec les prospects d'un projet Cloud.
+
+        Ce lot est strictement en lecture seule :
+        - aucune création de prospect ;
+        - aucune mise à jour Cloud ;
+        - aucune suppression ;
+        - correspondance UNIQUEMENT par SIRET exact ;
+        - pagination via ``cloud_client.list_prospects``.
+
+        ``cloud_client`` est injecté afin de conserver le service indépendant
+        de l'authentification et facilement testable.
+        """
+        path = Path(fichier_excel)
+        project_id = str(project_id or "").strip()
+        if not project_id:
+            raise ValueError("project_id Cloud requis.")
+        if apercu_limite < 0:
+            raise ValueError("apercu_limite doit être supérieur ou égal à 0.")
+        if page_size <= 0:
+            raise ValueError("page_size doit être strictement positif.")
+        if not hasattr(cloud_client, "list_prospects"):
+            raise TypeError("Le client Cloud doit fournir list_prospects().")
+
+        analyse = self.analyser_fichier(path)
+        df = pd.read_excel(path, dtype=str, keep_default_na=False).fillna("")
+        mappings = analyse["colonnes_reconnues"]
+        if not mappings.get("siret"):
+            raise ValueError(
+                "Le fichier Excel ne contient pas de colonne SIRET exploitable."
+            )
+
+        parsed_rows = []
+        target_sirets = set()
+        for excel_index, (_, row) in enumerate(df.iterrows(), start=2):
+            siret_info = self._identifier_from_row(
+                row,
+                mappings.get("siret", []),
+                expected_length=14,
+            )
+            siren_info = self._identifier_from_row(
+                row,
+                mappings.get("siren", []),
+                expected_length=9,
+            )
+            siret = siret_info["value"]
+            siren = siren_info["value"]
+            incoherent = bool(siret and siren and siret[:9] != siren)
+            payload = self._extract_update_values(row, mappings)
+            parsed_rows.append(
+                {
+                    "ligne_excel": excel_index,
+                    "siret": siret,
+                    "siret_present_mais_invalide": bool(
+                        siret_info["has_raw"] and not siret
+                    ),
+                    "incoherent": incoherent,
+                    "payload": payload,
+                }
+            )
+            if siret and not incoherent:
+                target_sirets.add(siret)
+
+        by_siret: dict[str, list[dict]] = {}
+        offset = 0
+        pages_lues = 0
+        prospects_cloud_lus = 0
+
+        while True:
+            page = cloud_client.list_prospects(
+                project_id=project_id,
+                limit=page_size,
+                offset=offset,
+            )
+            pages_lues += 1
+            items = list(getattr(page, "items", []) or [])
+            total = int(getattr(page, "total", len(items)) or 0)
+            prospects_cloud_lus += len(items)
+
+            for prospect in items:
+                if not isinstance(prospect, dict):
+                    continue
+                siret = self._normaliser_identifiant(
+                    prospect.get("siret", ""),
+                    expected_length=14,
+                )
+                if siret and siret in target_sirets:
+                    by_siret.setdefault(siret, []).append(prospect)
+
+            offset += len(items)
+            if not items or offset >= total:
+                break
+
+        potential = {field: 0 for field in self.DATABASE_FIELD_MAP}
+        stats = {
+            "fichier": str(path),
+            "project_id": project_id,
+            "lecture_seule": True,
+            "mode_base": "cloud_ro",
+            "cle_correspondance": "siret_exact",
+            "creation_prospects": False,
+            "suppression_donnees": False,
+            "mise_a_jour_cloud": False,
+            "lignes_excel": int(len(df)),
+            "pages_cloud_lues": pages_lues,
+            "prospects_cloud_lus": prospects_cloud_lus,
+            "lignes_comparees": 0,
+            "correspondances_siret": 0,
+            "introuvables": 0,
+            "ambigus_siret": 0,
+            "sans_siret": 0,
+            "siret_invalides": 0,
+            "ignores_incoherents": 0,
+            "lignes_sans_changement": 0,
+            "champs_vides_a_completer": 0,
+            "valeurs_a_fusionner": 0,
+            "conflits_a_verifier": 0,
+            "modifications_potentielles": potential,
+            "apercu": [],
+        }
+
+        available_columns = set(self.DATABASE_FIELD_MAP.values()) | {
+            "id", "siret", "siren", "entreprise"
+        }
+
+        for parsed in parsed_rows:
+            if parsed["incoherent"]:
+                stats["ignores_incoherents"] += 1
+                continue
+
+            siret = parsed["siret"]
+            if not siret:
+                if parsed["siret_present_mais_invalide"]:
+                    stats["siret_invalides"] += 1
+                else:
+                    stats["sans_siret"] += 1
+                continue
+
+            exact = by_siret.get(siret, [])
+            if len(exact) > 1:
+                stats["ambigus_siret"] += 1
+                continue
+            if not exact:
+                stats["introuvables"] += 1
+                continue
+
+            prospect = exact[0]
+            stats["lignes_comparees"] += 1
+            stats["correspondances_siret"] += 1
+            differences = self._compare_payload_with_prospect(
+                parsed["payload"],
+                prospect,
+                available_columns,
+            )
+
+            if not differences:
+                stats["lignes_sans_changement"] += 1
+                continue
+
+            for diff in differences:
+                source_field = diff["champ_source"]
+                if source_field in potential:
+                    potential[source_field] += diff["nombre_valeurs"]
+                if diff["action"] == "completer":
+                    stats["champs_vides_a_completer"] += 1
+                elif diff["action"] == "fusionner":
+                    stats["valeurs_a_fusionner"] += diff["nombre_valeurs"]
+                elif diff["action"] == "verifier":
+                    stats["conflits_a_verifier"] += 1
+
+            if len(stats["apercu"]) < apercu_limite:
+                stats["apercu"].append(
+                    {
+                        "ligne_excel": parsed["ligne_excel"],
+                        "correspondance": "siret",
+                        "prospect_id": prospect.get("id"),
+                        "siret": prospect.get("siret", ""),
+                        "siren": prospect.get("siren", ""),
+                        "entreprise": prospect.get("entreprise", ""),
+                        "differences": differences,
+                    }
+                )
+
+        return stats
+
     def appliquer_mise_a_jour_sqlite(
         self,
         fichier_excel,
