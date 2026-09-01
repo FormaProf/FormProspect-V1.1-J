@@ -658,6 +658,161 @@ class ProspectExcelUpdateService:
 
         return stats
 
+    def appliquer_mise_a_jour_cloud(
+        self,
+        fichier_excel,
+        cloud_client,
+        project_id: str,
+        *,
+        page_size: int = 500,
+    ) -> dict:
+        """Applique une mise à jour Excel additive sur un projet Cloud.
+
+        Contrairement au mode SQLite, l'API Cloud ne fournit pas de transaction
+        globale pour un lot de PATCH. Chaque prospect est donc traité
+        indépendamment et les erreurs sont consignées sans annuler les succès
+        déjà obtenus.
+
+        Garde-fous :
+        - correspondance par SIRET exact uniquement ;
+        - aucune création de prospect ;
+        - aucune suppression de donnée ;
+        - relecture du prospect juste avant écriture ;
+        - fusion sans doublon des champs multivalués ;
+        - aucun écrasement d'un champ scalaire déjà renseigné ;
+        - aucun PATCH du SIRET, du SIREN ou de l'identifiant du prospect.
+        """
+        path = Path(fichier_excel)
+        project_id = str(project_id or "").strip()
+        if not project_id:
+            raise ValueError("project_id Cloud requis.")
+        if page_size <= 0:
+            raise ValueError("page_size doit être strictement positif.")
+
+        required_methods = ("list_prospects", "get_prospect", "update_prospect")
+        missing = [name for name in required_methods if not hasattr(cloud_client, name)]
+        if missing:
+            raise TypeError(
+                "Le client Cloud doit fournir : " + ", ".join(required_methods) + "."
+            )
+
+        analyse = self.analyser_fichier(path)
+        preview = self.comparer_avec_cloud(
+            path,
+            cloud_client,
+            project_id,
+            apercu_limite=max(0, int(analyse.get("lignes_excel", 0))),
+            page_size=page_size,
+        )
+
+        result = {
+            "fichier": str(path),
+            "project_id": project_id,
+            "lecture_seule": False,
+            "mode_base": "cloud_rw_individual",
+            "cle_correspondance": "siret_exact",
+            "creation_prospects": False,
+            "suppression_donnees": False,
+            "mise_a_jour_cloud": True,
+            "transaction_atomique": False,
+            "rollback_global": False,
+            "correspondances_siret": int(preview.get("correspondances_siret", 0)),
+            "introuvables": int(preview.get("introuvables", 0)),
+            "ambigus_siret": int(preview.get("ambigus_siret", 0)),
+            "sans_siret": int(preview.get("sans_siret", 0)),
+            "siret_invalides": int(preview.get("siret_invalides", 0)),
+            "ignores_incoherents": int(preview.get("ignores_incoherents", 0)),
+            "prospects_mis_a_jour": 0,
+            "prospects_en_echec": 0,
+            "prospects_sans_action_runtime": 0,
+            "tentatives_mise_a_jour": 0,
+            "informations_ajoutees": 0,
+            "champs_completes": 0,
+            "valeurs_fusionnees": 0,
+            "conflits_ignores": int(preview.get("conflits_a_verifier", 0)),
+            "conflits_runtime_ignores": 0,
+            "echecs": [],
+        }
+
+        # Plusieurs lignes Excel peuvent viser le même SIRET. On regroupe les
+        # différences pour n'émettre au maximum qu'un PATCH par prospect.
+        grouped: dict[str, dict] = {}
+        for item in preview.get("apercu") or []:
+            prospect_id = str(item.get("prospect_id") or "").strip()
+            if not prospect_id:
+                continue
+            actionable = [
+                diff
+                for diff in (item.get("differences") or [])
+                if diff.get("action") in {"completer", "fusionner"}
+            ]
+            if not actionable:
+                continue
+            bucket = grouped.setdefault(
+                prospect_id,
+                {
+                    "prospect_id": prospect_id,
+                    "siret": self._normaliser_identifiant(
+                        item.get("siret", ""), expected_length=14
+                    ),
+                    "entreprise": str(item.get("entreprise") or "").strip(),
+                    "differences": [],
+                },
+            )
+            bucket["differences"].extend(actionable)
+
+        updated_ids = set()
+
+        for prospect_id, item in grouped.items():
+            try:
+                current = cloud_client.get_prospect(prospect_id)
+                if not isinstance(current, dict):
+                    raise ValueError("Réponse Cloud illisible pour le prospect.")
+
+                expected_siret = item.get("siret") or ""
+                current_siret = self._normaliser_identifiant(
+                    current.get("siret", ""), expected_length=14
+                )
+                if not expected_siret or current_siret != expected_siret:
+                    raise ValueError(
+                        "Le SIRET du prospect Cloud a changé depuis l'aperçu ; "
+                        "mise à jour refusée."
+                    )
+
+                updates, counters = self._build_additive_cloud_updates(
+                    current,
+                    item.get("differences") or [],
+                )
+                result["conflits_runtime_ignores"] += counters["conflits_runtime"]
+
+                if not updates:
+                    result["prospects_sans_action_runtime"] += 1
+                    continue
+
+                # Le payload ne contient volontairement ni id, ni SIRET, ni
+                # SIREN : seuls les champs d'enrichissement sont patchés.
+                result["tentatives_mise_a_jour"] += 1
+                cloud_client.update_prospect(prospect_id, updates)
+
+                updated_ids.add(prospect_id)
+                result["informations_ajoutees"] += counters["informations_ajoutees"]
+                result["champs_completes"] += counters["champs_completes"]
+                result["valeurs_fusionnees"] += counters["valeurs_fusionnees"]
+            except Exception as exc:
+                result["prospects_en_echec"] += 1
+                result["echecs"].append(
+                    {
+                        "prospect_id": prospect_id,
+                        "siret": item.get("siret") or "",
+                        "entreprise": item.get("entreprise") or "",
+                        "erreur": str(exc),
+                    }
+                )
+
+        result["prospects_mis_a_jour"] = len(updated_ids)
+        result["mise_a_jour_partielle"] = bool(result["prospects_en_echec"])
+        return result
+
     def appliquer_mise_a_jour_sqlite(
         self,
         fichier_excel,
@@ -820,6 +975,83 @@ class ProspectExcelUpdateService:
 
         result["prospects_mis_a_jour"] = len(updated_ids)
         return result
+
+    def _build_additive_cloud_updates(
+        self,
+        current: dict,
+        differences: list[dict],
+    ) -> tuple[dict[str, str], dict[str, int]]:
+        """Construit un PATCH Cloud additif à partir de l'état le plus récent."""
+        updates: dict[str, str] = {}
+        counters = {
+            "informations_ajoutees": 0,
+            "champs_completes": 0,
+            "valeurs_fusionnees": 0,
+            "conflits_runtime": 0,
+        }
+
+        grouped: dict[str, list[dict]] = {}
+        for diff in differences:
+            destination = str(diff.get("champ_destination") or "").strip()
+            if not destination or destination not in self.DATABASE_FIELD_MAP.values():
+                continue
+            if destination in {"id", "siret", "siren"}:
+                continue
+            grouped.setdefault(destination, []).append(diff)
+
+        for destination, field_diffs in grouped.items():
+            current_value = str(current.get(destination, "") or "").strip()
+            incoming_values = []
+            for diff in field_diffs:
+                incoming_values.extend(
+                    str(value).strip()
+                    for value in (diff.get("valeurs_excel") or [])
+                    if str(value).strip()
+                )
+            if not incoming_values:
+                continue
+
+            if destination in self.MERGE_FIELDS:
+                merged, added_count = self._merge_additive_values(
+                    current_value,
+                    incoming_values,
+                    destination,
+                )
+                if added_count <= 0 or merged == current_value:
+                    continue
+                updates[destination] = merged
+                counters["informations_ajoutees"] += added_count
+                if current_value:
+                    counters["valeurs_fusionnees"] += added_count
+                else:
+                    counters["champs_completes"] += 1
+                continue
+
+            # Champ scalaire : on ne complète que s'il est encore vide au
+            # moment exact de l'écriture. Si plusieurs lignes Excel proposent
+            # des valeurs différentes, on refuse aussi de choisir arbitrairement.
+            if current_value:
+                continue
+
+            unique = []
+            seen = set()
+            for value in incoming_values:
+                key = self._normaliser_scalar(value, destination)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                unique.append(value)
+
+            if len(unique) != 1:
+                if len(unique) > 1:
+                    counters["conflits_runtime"] += 1
+                continue
+
+            updates[destination] = unique[0]
+            counters["informations_ajoutees"] += 1
+            counters["champs_completes"] += 1
+
+        return updates, counters
 
     def _merge_additive_values(
         self,

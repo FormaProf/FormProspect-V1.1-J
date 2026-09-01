@@ -136,23 +136,45 @@ def _as_int(value) -> int:
 
 def build_excel_update_result_text(stats: dict) -> str:
     """Construit le bilan d'une mise à jour Excel additive réellement appliquée."""
-    return "\n".join(
+    is_cloud = str(stats.get("mode_base") or "").startswith("cloud_")
+    transaction_atomique = bool(stats.get("transaction_atomique", not is_cloud))
+
+    if transaction_atomique:
+        transaction_line = "Transaction atomique / rollback en cas d'erreur : OUI"
+    else:
+        transaction_line = (
+            "Transaction atomique / rollback global : NON — "
+            "traitement Cloud prospect par prospect"
+        )
+
+    lines = [
+        "MISE À JOUR EXCEL TERMINÉE",
+        "",
+        f"Fichier : {stats.get('fichier') or '—'}",
+        "Clé de correspondance : SIRET exact uniquement",
+        "Création automatique de prospects : NON",
+        "Suppression de données existantes : NON",
+        transaction_line,
+        "",
+        "RÉSULTAT",
+        f"Prospects retrouvés par SIRET : {_as_int(stats.get('correspondances_siret'))}",
+        f"Prospects mis à jour : {_as_int(stats.get('prospects_mis_a_jour'))}",
+        f"Informations ajoutées : {_as_int(stats.get('informations_ajoutees'))}",
+        f"Champs vides complétés : {_as_int(stats.get('champs_completes'))}",
+        f"Valeurs fusionnées : {_as_int(stats.get('valeurs_fusionnees'))}",
+        f"Conflits conservés sans écrasement : {_as_int(stats.get('conflits_ignores')) + _as_int(stats.get('conflits_runtime_ignores'))}",
+    ]
+
+    if is_cloud:
+        lines.extend(
+            [
+                f"Prospects en échec : {_as_int(stats.get('prospects_en_echec'))}",
+                f"Prospects devenus sans action avant PATCH : {_as_int(stats.get('prospects_sans_action_runtime'))}",
+            ]
+        )
+
+    lines.extend(
         [
-            "MISE À JOUR EXCEL TERMINÉE",
-            "",
-            f"Fichier : {stats.get('fichier') or '—'}",
-            "Clé de correspondance : SIRET exact uniquement",
-            "Création automatique de prospects : NON",
-            "Suppression de données existantes : NON",
-            "Transaction atomique / rollback en cas d'erreur : OUI",
-            "",
-            "RÉSULTAT",
-            f"Prospects retrouvés par SIRET : {_as_int(stats.get('correspondances_siret'))}",
-            f"Prospects mis à jour : {_as_int(stats.get('prospects_mis_a_jour'))}",
-            f"Informations ajoutées : {_as_int(stats.get('informations_ajoutees'))}",
-            f"Champs vides complétés : {_as_int(stats.get('champs_completes'))}",
-            f"Valeurs fusionnées : {_as_int(stats.get('valeurs_fusionnees'))}",
-            f"Conflits conservés sans écrasement : {_as_int(stats.get('conflits_ignores'))}",
             "",
             "IGNORÉS SANS MODIFICATION",
             f"SIRET introuvables : {_as_int(stats.get('introuvables'))}",
@@ -160,7 +182,19 @@ def build_excel_update_result_text(stats: dict) -> str:
             f"SIRET invalides : {_as_int(stats.get('siret_invalides'))}",
             f"SIRET ambigus : {_as_int(stats.get('ambigus_siret'))}",
             f"Identifiants incohérents : {_as_int(stats.get('ignores_incoherents'))}",
-            "",
-            "Aucune ancienne donnée n'a été supprimée.",
         ]
     )
+
+    failures = list(stats.get("echecs") or [])
+    if failures:
+        lines.extend(["", "ÉCHECS CLOUD"])
+        for failure in failures[:20]:
+            company = str(failure.get("entreprise") or "Prospect").strip()
+            siret = str(failure.get("siret") or "—").strip()
+            error = str(failure.get("erreur") or "Erreur inconnue").strip()
+            lines.append(f"• {company} — SIRET {siret} : {error}")
+        if len(failures) > 20:
+            lines.append(f"… {len(failures) - 20} autre(s) échec(s).")
+
+    lines.extend(["", "Aucune ancienne donnée n'a été supprimée."])
+    return "\n".join(lines)

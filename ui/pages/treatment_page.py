@@ -470,9 +470,8 @@ class TreatmentPage(QWidget):
                 f"Projet Cloud actif : {project_name}"
             )
             self.label_details.setText(
-                "Projet Cloud actif. L'enrichissement par fichier Excel peut "
-                "être analysé par SIRET exact en lecture seule. "
-                "L'écriture Cloud reste désactivée dans ce lot."
+                "Projet Cloud actif. L'enrichissement Excel fonctionne par SIRET exact. "
+                "Les écritures Cloud sont additives et traitées prospect par prospect."
             )
             self.bouton_importer.setEnabled(False)
             self.bouton_aliases.setEnabled(False)
@@ -480,7 +479,13 @@ class TreatmentPage(QWidget):
             self.bouton_analyser_mise_a_jour.setEnabled(
                 bool(self.fichier_excel_mise_a_jour)
             )
-            self.bouton_appliquer_mise_a_jour.setEnabled(False)
+            self.bouton_appliquer_mise_a_jour.setEnabled(
+                bool(
+                    self.excel_update_preview_stats
+                    and self.excel_update_preview_stats.get("mode_base") == "cloud_ro"
+                    and self._excel_update_has_actions(self.excel_update_preview_stats)
+                )
+            )
             if (
                 self.excel_update_preview_stats is None
                 or self.excel_update_preview_stats.get("mode_base") != "cloud_ro"
@@ -632,7 +637,7 @@ class TreatmentPage(QWidget):
                     project_id,
                     apercu_limite=100,
                 )
-                apply_enabled = False
+                apply_enabled = self._excel_update_has_actions(stats)
                 badge_text = "Aperçu Cloud prêt"
                 mode_label = "Cloud"
             else:
@@ -706,12 +711,95 @@ class TreatmentPage(QWidget):
 
         context = self.datasource_resolver.resolve()
         if context.is_cloud:
-            QMessageBox.information(
+            preview = self.excel_update_preview_stats
+            if not self._excel_update_has_actions(preview):
+                NotificationManager.info(
+                    "Enrichissement Excel",
+                    "Aucune nouvelle information n'est à ajouter.",
+                )
+                self.bouton_appliquer_mise_a_jour.setEnabled(False)
+                return
+
+            answer = QMessageBox.question(
                 self,
-                "Projet Cloud",
-                "L'écriture Excel Cloud sera ajoutée dans le lot Cloud dédié. "
-                "Aucune modification n'a été effectuée.",
+                "Confirmer l'enrichissement Excel Cloud",
+                f"{preview.get('correspondances_siret', 0)} prospect(s) ont été retrouvés par SIRET exact.\n\n"
+                f"Champs vides à compléter : {preview.get('champs_vides_a_completer', 0)}\n"
+                f"Valeurs à fusionner : {preview.get('valeurs_a_fusionner', 0)}\n"
+                f"Conflits conservés sans écrasement : {preview.get('conflits_a_verifier', 0)}\n\n"
+                "Aucun prospect ne sera créé et aucune ancienne donnée ne sera supprimée.\n"
+                "Le Cloud traite chaque prospect séparément : il n'existe pas de rollback global "
+                "si une requête échoue au milieu du lot. Les échecs seront listés dans le bilan.\n\n"
+                "Voulez-vous appliquer ces ajouts ?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
             )
+            if answer != QMessageBox.Yes:
+                return
+
+            project_id = str(context.project_id or "").strip()
+            if not project_id:
+                QMessageBox.critical(
+                    self,
+                    "Projet Cloud",
+                    "Le projet Cloud actif ne possède aucun identifiant valide.",
+                )
+                return
+
+            try:
+                self.excel_update_badge.set_state("running", "Mise à jour Cloud")
+                self.bouton_appliquer_mise_a_jour.setEnabled(False)
+                result = self.excel_update_service.appliquer_mise_a_jour_cloud(
+                    self.fichier_excel_mise_a_jour,
+                    CloudRuntime.api(),
+                    project_id,
+                )
+                self.excel_update_preview.setPlainText(
+                    build_excel_update_result_text(result)
+                )
+                self.excel_update_preview_stats = None
+
+                failures = int(result.get("prospects_en_echec", 0) or 0)
+                if failures:
+                    self.excel_update_badge.set_state("error", "Terminé avec erreurs")
+                    NotificationManager.warning(
+                        "Enrichissement Excel Cloud partiel",
+                        f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour, "
+                        f"{failures} échec(s). Consultez le bilan.",
+                    )
+                else:
+                    self.excel_update_badge.set_state("success", "Cloud mis à jour")
+                    NotificationManager.success(
+                        "Enrichissement Excel Cloud terminé",
+                        f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour. "
+                        "Aucune ancienne donnée n'a été supprimée.",
+                    )
+
+                ActivityService.record(
+                    "Enrichissement Excel Cloud appliqué",
+                    f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour, "
+                    f"{failures} échec(s).",
+                    category="enrichment",
+                    level="warning" if failures else "success",
+                    metadata=result,
+                )
+                self.log(
+                    "☁️ Excel Cloud : "
+                    f"{result.get('prospects_mis_a_jour', 0)} prospect(s) mis à jour, "
+                    f"{result.get('informations_ajoutees', 0)} information(s) ajoutée(s), "
+                    f"{failures} échec(s), 0 donnée supprimée."
+                )
+            except Exception as exc:
+                self.excel_update_badge.set_state("error", "Erreur Cloud")
+                self.bouton_appliquer_mise_a_jour.setEnabled(
+                    self._excel_update_has_actions(self.excel_update_preview_stats)
+                )
+                QMessageBox.critical(
+                    self,
+                    "Erreur de mise à jour Excel Cloud",
+                    "La mise à jour Cloud n'a pas pu démarrer ou s'est interrompue avant le bilan.\n\n"
+                    f"Détail : {exc}",
+                )
             return
 
         project = context.project or ApplicationState.get_project()

@@ -42,13 +42,14 @@ def test_cloud_preview_uses_cloud_runtime_and_read_only_comparison():
     assert "appliquer_mise_a_jour_sqlite" not in calls
 
 
-def test_cloud_project_enables_analysis_but_never_apply_button():
+def test_cloud_project_enables_analysis_and_actionable_apply_button():
     source = PAGE_PATH.read_text(encoding="utf-8")
 
     assert 'self.excel_update_badge.set_state("idle", "Cloud prêt")' in source
     assert "bool(self.fichier_excel_mise_a_jour)" in source
-    assert "self.bouton_appliquer_mise_a_jour.setEnabled(False)" in source
-    assert "L'écriture Cloud reste désactivée dans ce lot." in source
+    assert 'self.excel_update_preview_stats.get("mode_base") == "cloud_ro"' in source
+    assert "self._excel_update_has_actions(self.excel_update_preview_stats)" in source
+    assert "Les écritures Cloud sont additives" in source
 
 
 def test_cloud_preview_uses_resolved_project_id():
@@ -59,12 +60,13 @@ def test_cloud_preview_uses_resolved_project_id():
     assert "project_id," in source
 
 
-def test_apply_method_still_refuses_cloud_writes():
+def test_apply_method_routes_cloud_to_dedicated_additive_service():
     source = PAGE_PATH.read_text(encoding="utf-8")
     method = _method("appliquer_mise_a_jour_excel")
     segment = ast.get_source_segment(source, method) or ""
 
     assert "if context.is_cloud" in segment
-    assert "Aucune modification n'a été effectuée" in segment
+    assert "appliquer_mise_a_jour_cloud" in segment
+    assert "CloudRuntime.api()" in segment
+    assert "rollback global" in segment
     assert "appliquer_mise_a_jour_sqlite" in segment
-    assert "update_prospect" not in segment
