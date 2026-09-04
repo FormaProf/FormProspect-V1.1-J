@@ -16,6 +16,7 @@ class AuthenticatedUser:
     organization_id: str = ""
     organization_name: str = ""
     permissions: tuple[str, ...] = ()
+    can_create_prospect_manually: bool = False
 
     @property
     def display_name(self) -> str:

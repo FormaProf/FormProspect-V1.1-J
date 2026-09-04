@@ -148,6 +148,9 @@ class CloudAuthService:
             organization_id=self.current_user.organization_id,
             organization_name=self.current_user.organization_name,
             permissions=self.current_user.permissions,
+            can_create_prospect_manually=(
+                self.current_user.can_create_prospect_manually
+            ),
         )
         return self.current_user
 
@@ -604,6 +607,9 @@ class CloudAuthService:
             organization_id=membership["organization_id"],
             organization_name=membership["organization_name"],
             permissions=tuple(me.get("permissions", [])),
+            can_create_prospect_manually=bool(
+                me.get("can_create_prospect_manually", False)
+            ),
         )
         return self.current_user
 
