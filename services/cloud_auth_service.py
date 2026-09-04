@@ -103,6 +103,9 @@ class CloudAuthService:
                     'presence_status': str(item.get('presence_status') or 'offline'),
                     'commercial_partner_id': str(item.get('commercial_partner_id') or '') or None,
                     'manager_user_id': str(item.get('manager_user_id') or '') or None,
+                    'can_create_prospect_manually': bool(
+                        item.get('can_create_prospect_manually', False)
+                    ),
                 }
             )
         return users
@@ -348,6 +351,31 @@ class CloudAuthService:
             raise CloudAuthError(
                 "Form@Prospect Cloud n'a pas confirmé la modification du compte."
             )
+        return payload
+
+    def set_manual_prospect_creation_permission(
+        self,
+        membership_id: str,
+        allowed: bool,
+    ) -> dict:
+        """Accorde ou retire le droit individuel de cr?ation manuelle."""
+
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        payload = self.api.patch_json(
+            f"/admin/users/{str(membership_id).strip()}",
+            {
+                "can_create_prospect_manually": bool(allowed),
+            },
+        )
+
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirm? la modification "
+                "du droit de cr?ation manuelle."
+            )
+
         return payload
 
     def set_role(self, membership_id: str, role: str) -> dict:
