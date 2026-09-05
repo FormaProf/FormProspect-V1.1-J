@@ -215,6 +215,30 @@ class ImportService:
 
         total = 0
 
+        def normaliser_siret(value):
+            return "".join(
+                char
+                for char in str(value or "")
+                if char.isdigit()
+            )
+
+        cur.execute(
+            """
+            SELECT siret
+            FROM prospects
+            WHERE COALESCE(TRIM(siret), '') <> ''
+            """
+        )
+
+        sirets_existants = set()
+
+        for (existing_siret,) in cur.fetchall():
+            normalized = normaliser_siret(
+                existing_siret
+            )
+            if len(normalized) == 14:
+                sirets_existants.add(normalized)
+
         for _, row in df.iterrows():
             entreprise = self._nom_entreprise(row, colonnes)
             noms_recherche = self._serialiser_noms_recherche(
@@ -228,6 +252,18 @@ class ImportService:
                 "siret etablissement",
                 "siret établissement",
             ])
+
+            siret = normaliser_siret(siret)
+
+            # Toute nouvelle entree doit avoir un SIRET
+            # valide compose exactement de 14 chiffres.
+            if len(siret) != 14:
+                continue
+
+            # Un SIRET deja present est ignore :
+            # aucune mise a jour et aucune reaffectation.
+            if siret in sirets_existants:
+                continue
 
             siren = self._valeur(row, colonnes, [
                 "siren",
@@ -373,6 +409,7 @@ class ImportService:
                 noms_recherche,
             ))
 
+            sirets_existants.add(siret)
             total += 1
 
         conn.commit()
