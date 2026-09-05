@@ -330,6 +330,20 @@ class AdminAccountPage(QWidget):
         )
         self.promote_button.clicked.connect(self._promote_user)
 
+        self.manual_prospect_permission_button = QPushButton(
+            "Autoriser la cr\u00e9ation de prospects"
+        )
+        self.manual_prospect_permission_button.setObjectName(
+            "SecondaryButton"
+        )
+        self.manual_prospect_permission_button.setEnabled(False)
+        self.manual_prospect_permission_button.setToolTip(
+            "S\u00e9lectionnez un commercial."
+        )
+        self.manual_prospect_permission_button.clicked.connect(
+            self._toggle_manual_prospect_permission
+        )
+
         self.transfer_portfolio_button = QPushButton("Transférer le portefeuille")
         self.transfer_portfolio_button.setObjectName("TransferButton")
         self.transfer_portfolio_button.setEnabled(False)
@@ -348,6 +362,9 @@ class AdminAccountPage(QWidget):
         action_row.addWidget(toggle)
         action_row.addWidget(reset)
         action_row.addWidget(self.promote_button)
+        action_row.addWidget(
+            self.manual_prospect_permission_button
+        )
         action_row.addWidget(self.transfer_portfolio_button)
         action_row.addWidget(self.partners_button)
         action_row.addStretch(1)
@@ -377,6 +394,9 @@ class AdminAccountPage(QWidget):
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setWordWrap(False)
         self.table.itemSelectionChanged.connect(self._update_promote_button)
+        self.table.itemSelectionChanged.connect(
+            self._update_manual_prospect_permission_button
+        )
         self.table.itemSelectionChanged.connect(self._update_transfer_button)
 
         header = self.table.horizontalHeader()
@@ -562,6 +582,18 @@ class AdminAccountPage(QWidget):
 
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
+
+                if column == 0:
+                    item.setData(
+                        Qt.UserRole,
+                        bool(
+                            user.get(
+                                "can_create_prospect_manually",
+                                False,
+                            )
+                        ),
+                    )
+
                 item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
                 if column == 1:
@@ -693,12 +725,22 @@ class AdminAccountPage(QWidget):
             item = self.table.item(row, column)
             return item.text().strip() if item else ""
 
+        permission_item = self.table.item(row, 0)
+        can_create_prospect_manually = (
+            bool(permission_item.data(Qt.UserRole))
+            if permission_item is not None
+            else False
+        )
+
         return {
             "id": cell(0),
             "name": cell(1),
             "email": cell(2),
             "role": cell(3),
             "active": cell(4) == "Actif",
+            "can_create_prospect_manually": (
+                can_create_prospect_manually
+            ),
         }
 
     def _selected_user(self):
@@ -737,6 +779,64 @@ class AdminAccountPage(QWidget):
         else:
             self.promote_button.setToolTip(
                 "Sélectionnez un commercial actif à promouvoir en Head of Sales."
+            )
+
+    def _update_manual_prospect_permission_button(self):
+        if not hasattr(
+            self,
+            "manual_prospect_permission_button",
+        ):
+            return
+
+        button = self.manual_prospect_permission_button
+
+        if not getattr(self.auth_service, "is_cloud", False):
+            button.setVisible(False)
+            return
+
+        button.setVisible(True)
+
+        details = self._selected_user_details(
+            show_message=False
+        )
+
+        enabled = bool(
+            details
+            and details["role"] == "Commercial"
+        )
+
+        button.setEnabled(enabled)
+
+        if not enabled:
+            button.setText(
+                "Autoriser la cr\u00e9ation de prospects"
+            )
+            button.setToolTip(
+                "S\u00e9lectionnez un commercial pour "
+                "g\u00e9rer son autorisation de "
+                "cr\u00e9ation manuelle."
+            )
+            return
+
+        allowed = bool(
+            details["can_create_prospect_manually"]
+        )
+
+        if allowed:
+            button.setText(
+                "Retirer l'autorisation"
+            )
+            button.setToolTip(
+                f"Retirer \u00e0 {details['name']} le droit "
+                "de cr\u00e9er manuellement des prospects."
+            )
+        else:
+            button.setText(
+                "Autoriser la cr\u00e9ation de prospects"
+            )
+            button.setToolTip(
+                f"Autoriser {details['name']} \u00e0 cr\u00e9er "
+                "manuellement des prospects."
             )
 
     def _update_transfer_button(self):
@@ -812,6 +912,91 @@ class AdminAccountPage(QWidget):
             return
 
         self._open_portfolio_transfer(details)
+
+    def _toggle_manual_prospect_permission(self):
+        details = self._selected_user_details()
+
+        if details is None:
+            return
+
+        if details["role"] != "Commercial":
+            QMessageBox.information(
+                self,
+                "Cr\u00e9ation manuelle de prospects",
+                (
+                    "Cette autorisation individuelle "
+                    "s'applique uniquement aux commerciaux."
+                ),
+            )
+            return
+
+        currently_allowed = bool(
+            details["can_create_prospect_manually"]
+        )
+        new_allowed = not currently_allowed
+
+        if new_allowed:
+            title = (
+                "Autoriser la cr\u00e9ation de prospects"
+            )
+            message = (
+                f"Autoriser {details['name']} \u00e0 cr\u00e9er "
+                "manuellement de nouveaux prospects "
+                "dans Form@Prospect ?\n\n"
+                "Chaque nouveau prospect devra comporter "
+                "un SIRET valide et unique."
+            )
+        else:
+            title = "Retirer l'autorisation"
+            message = (
+                f"Retirer \u00e0 {details['name']} "
+                "l'autorisation de cr\u00e9er manuellement "
+                "de nouveaux prospects ?\n\n"
+                "Les prospects d\u00e9j\u00e0 cr\u00e9\u00e9s "
+                "restent inchang\u00e9s."
+            )
+
+        answer = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if answer != QMessageBox.Yes:
+            return
+
+        try:
+            self.auth_service.set_manual_prospect_creation_permission(
+                details["id"],
+                new_allowed,
+            )
+            self.rafraichir()
+
+            if new_allowed:
+                NotificationManager.success(
+                    "Autorisation accord\u00e9e",
+                    (
+                        f"{details['name']} peut d\u00e9sormais "
+                        "cr\u00e9er manuellement des prospects."
+                    ),
+                )
+            else:
+                NotificationManager.success(
+                    "Autorisation retir\u00e9e",
+                    (
+                        f"{details['name']} ne peut plus "
+                        "cr\u00e9er manuellement de prospects."
+                    ),
+                )
+
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Modification impossible",
+                str(exc),
+            )
 
     def _promote_user(self):
         details = self._selected_user_details()
