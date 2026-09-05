@@ -80,8 +80,17 @@ def test_trainer_has_no_manual_creation_access():
     assert '"Formateur"' not in segment
 
 
-def test_button_is_not_clickable_before_creation_flow_exists():
+def test_button_clickability_follows_manual_creation_permission():
     assert (
-        "self.bouton_ajouter_prospect.setEnabled(False)"
+        "self.bouton_ajouter_prospect.setEnabled("
+        in SOURCE
+    )
+    assert "can_create_manually" in SOURCE
+    assert (
+        "self.bouton_ajouter_prospect.clicked.connect("
+        in SOURCE
+    )
+    assert (
+        "self.ajouter_prospect_manuellement"
         in SOURCE
     )

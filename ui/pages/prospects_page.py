@@ -25,6 +25,7 @@ from services.prospect_service import ProspectService
 from services.enrichment_service import EnrichmentService
 from services.export_service import ExportService
 from ui.dialogs.prospect_dialog import ProspectDialog
+from ui.dialogs.manual_prospect_dialog import ManualProspectDialog
 from ui.dialogs.client_onboarding_wizard import ClientOnboardingWizard
 from ui.dialogs.cloud_client_onboarding_dialog import CloudClientOnboardingDialog
 from ui.widgets.crm.filters_bar import CRMFiltersBar
@@ -276,10 +277,12 @@ class ProspectsPage(QWidget):
             can_create_manually
         )
 
-        # Le formulaire sera branche dans le sous-lot suivant.
-        # Tant que la creation Local/Cloud n'est pas disponible,
-        # on n'expose pas une action partiellement fonctionnelle.
-        self.bouton_ajouter_prospect.setEnabled(False)
+        self.bouton_ajouter_prospect.setEnabled(
+            can_create_manually
+        )
+        self.bouton_ajouter_prospect.clicked.connect(
+            self.ajouter_prospect_manuellement
+        )
 
         self.bouton_enrichir_selection = QPushButton("↻  Enrichir la sélection")
         self.bouton_enrichir_selection.setFixedHeight(40)
@@ -675,6 +678,30 @@ class ProspectsPage(QWidget):
                 self,
                 "Filtres",
                 f"Impossible de charger les filtres :\n{e}",
+            )
+
+    def ajouter_prospect_manuellement(self):
+        if not self._peut_creer_prospect_manuellement():
+            QMessageBox.warning(
+                self,
+                "Cr?ation non autoris?e",
+                (
+                    "Votre compte n'est pas autoris? ? "
+                    "cr?er des prospects manuellement."
+                ),
+            )
+            return
+
+        dialog = ManualProspectDialog(
+            self.prospect_service,
+            self._database_path(),
+            is_cloud_mode=self._is_cloud(),
+            parent=self,
+        )
+
+        if dialog.exec() == dialog.Accepted:
+            self.charger_prospects(
+                force_refresh=True
             )
 
     def charger_prospects(self, force_refresh=False):
