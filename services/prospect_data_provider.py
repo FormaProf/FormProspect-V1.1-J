@@ -78,6 +78,10 @@ class ProspectDataProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def create_prospect(self, data: dict):
+        raise NotImplementedError
+
+    @abstractmethod
     def update_pipeline(self, prospect_id, pipeline: str):
         raise NotImplementedError
 
@@ -171,6 +175,21 @@ class LocalProspectDataProvider(ProspectDataProvider):
 
     def get_by_id(self, prospect_id):
         return self.repository.get_by_id(prospect_id)
+
+    def create_prospect(self, data: dict):
+        payload = dict(data or {})
+
+        if not str(
+            payload.get("commercial_assigne") or ""
+        ).strip():
+            current_user = SessionState.user()
+
+            if current_user is not None:
+                payload["commercial_assigne"] = (
+                    current_user.display_name
+                )
+
+        return self.repository.create_prospect(payload)
 
     def update_pipeline(self, prospect_id, pipeline):
         return self.repository.update_pipeline(prospect_id, pipeline)
@@ -703,6 +722,17 @@ class CloudProspectDataProvider(ProspectDataProvider):
             self.api_client.get_prospect(str(prospect_id)),
             detailed=True,
         )
+
+    def create_prospect(self, data: dict):
+        payload = dict(data or {})
+
+        if (
+            self.project_id
+            and not payload.get("project_id")
+        ):
+            payload["project_id"] = self.project_id
+
+        return self.api_client.create_prospect(payload)
 
     def update_pipeline(self, prospect_id, pipeline):
         self.api_client.change_stage(

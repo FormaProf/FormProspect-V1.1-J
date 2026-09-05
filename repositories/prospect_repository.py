@@ -403,6 +403,184 @@ class ProspectRepository(BaseRepository):
         finally:
             conn.close()
 
+    def create_prospect(self, data: dict):
+        payload = dict(data or {})
+
+        company_name = str(
+            payload.get("company_name") or ""
+        ).strip()
+
+        if not company_name:
+            raise ValueError(
+                "Le nom de l'entreprise est obligatoire."
+            )
+
+        raw_siret = str(
+            payload.get("siret") or ""
+        ).strip()
+
+        siret = (
+            raw_siret
+            .replace(" ", "")
+            .replace("\u00a0", "")
+        )
+
+        if len(siret) != 14 or not siret.isdigit():
+            raise ValueError(
+                "Le SIRET doit contenir exactement "
+                "14 chiffres."
+            )
+
+        siren = str(
+            payload.get("siren") or ""
+        ).strip()
+
+        if not siren:
+            siren = siret[:9]
+
+        conn = self.get_connection()
+
+        try:
+            self._ensure_social_deployment_columns(conn)
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                SELECT id
+                FROM prospects
+                WHERE REPLACE(
+                    TRIM(COALESCE(siret, '')),
+                    ' ',
+                    ''
+                ) = ?
+                LIMIT 1
+                """,
+                (siret,),
+            )
+
+            if cur.fetchone() is not None:
+                raise ValueError(
+                    "Ce SIRET est deja present "
+                    "dans Form@Prospect."
+                )
+
+            cur.execute(
+                "PRAGMA table_info(prospects)"
+            )
+
+            existing_columns = {
+                str(row[1])
+                for row in cur.fetchall()
+            }
+
+            search_names = " | ".join(
+                value
+                for value in (
+                    company_name,
+                    str(
+                        payload.get(
+                            "contact_first_name"
+                        ) or ""
+                    ).strip(),
+                    str(
+                        payload.get(
+                            "contact_last_name"
+                        ) or ""
+                    ).strip(),
+                    str(
+                        payload.get(
+                            "contact_name"
+                        ) or ""
+                    ).strip(),
+                )
+                if value
+            )
+
+            values = {
+                "entreprise": company_name,
+                "siret": siret,
+                "siren": siren,
+                "adresse": str(
+                    payload.get("address") or ""
+                ).strip(),
+                "code_postal": str(
+                    payload.get("postal_code") or ""
+                ).strip(),
+                "ville": str(
+                    payload.get("city") or ""
+                ).strip(),
+                "code_naf": str(
+                    payload.get("naf_code") or ""
+                ).strip(),
+                "telephone": str(
+                    payload.get("phone") or ""
+                ).strip(),
+                "mobile": str(
+                    payload.get("mobile") or ""
+                ).strip(),
+                "site_web": str(
+                    payload.get("website") or ""
+                ).strip(),
+                "email": str(
+                    payload.get("email") or ""
+                ).strip(),
+                "facebook": str(
+                    payload.get("facebook") or ""
+                ).strip(),
+                "linkedin": str(
+                    payload.get("linkedin") or ""
+                ).strip(),
+                "instagram": str(
+                    payload.get("instagram") or ""
+                ).strip(),
+                "youtube": str(
+                    payload.get("youtube") or ""
+                ).strip(),
+                "statut_enrichissement": "Manuel",
+                "date_collecte": "",
+                "commercial_assigne": str(
+                    payload.get(
+                        "commercial_assigne"
+                    ) or ""
+                ).strip(),
+                "noms_recherche": search_names,
+            }
+
+            insert_values = {
+                column: value
+                for column, value in values.items()
+                if column in existing_columns
+            }
+
+            columns_sql = ", ".join(
+                insert_values.keys()
+            )
+            placeholders = ", ".join(
+                "?"
+                for _ in insert_values
+            )
+
+            cur.execute(
+                (
+                    f"INSERT INTO prospects "
+                    f"({columns_sql}) "
+                    f"VALUES ({placeholders})"
+                ),
+                tuple(insert_values.values()),
+            )
+
+            prospect_id = cur.lastrowid
+            conn.commit()
+
+            return prospect_id
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
+
     def update_pipeline(self, prospect_id, pipeline):
         conn = self.get_connection()
         try:
@@ -494,5 +672,3 @@ class ProspectRepository(BaseRepository):
             conn.commit()
         finally:
             conn.close()
-
-

@@ -304,6 +304,61 @@ class ProspectService:
             database_path
         ).get_by_id(prospect_id)
 
+    def creer_prospect(
+        self,
+        database_path=None,
+        *,
+        data: dict,
+    ):
+        payload = dict(data or {})
+
+        company_name = str(
+            payload.get("company_name") or ""
+        ).strip()
+
+        if not company_name:
+            raise ValueError(
+                "Le nom de l'entreprise est obligatoire."
+            )
+
+        raw_siret = str(
+            payload.get("siret") or ""
+        ).strip()
+
+        siret = (
+            raw_siret
+            .replace(" ", "")
+            .replace("\u00a0", "")
+        )
+
+        if len(siret) != 14 or not siret.isdigit():
+            raise ValueError(
+                "Le SIRET doit contenir exactement "
+                "14 chiffres."
+            )
+
+        payload["company_name"] = company_name
+        payload["siret"] = siret
+
+        if not str(
+            payload.get("siren") or ""
+        ).strip():
+            payload["siren"] = siret[:9]
+
+        provider = self._provider(database_path)
+        result = provider.create_prospect(payload)
+
+        if hasattr(provider, "_stats_cache"):
+            provider._stats_cache = None
+
+        if hasattr(
+            provider,
+            "_filter_options_cache",
+        ):
+            provider._filter_options_cache = None
+
+        return result
+
     def mettre_a_jour_pipeline(
         self,
         database_path,

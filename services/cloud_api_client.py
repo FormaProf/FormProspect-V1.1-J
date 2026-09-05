@@ -402,6 +402,16 @@ class CloudAPIClient:
             ),
         }
 
+    def create_prospect(
+        self,
+        payload: dict,
+    ) -> dict:
+        return self.post_json(
+            "/prospects",
+            payload,
+            expected=(201,),
+        )
+
     def get_prospect(
         self,
         prospect_id: str,
@@ -1903,9 +1913,3 @@ class CloudAPIClient:
             year=year,
             commercial_user_id=commercial_user_id,
         )
-
-
-
-
-
-
