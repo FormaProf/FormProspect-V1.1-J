@@ -257,6 +257,30 @@ class ProspectsPage(QWidget):
             bouton.setFixedHeight(40)
             bouton.setStyleSheet(self.style_bouton_vue())
 
+        self.bouton_ajouter_prospect = QPushButton(
+            "+ Ajouter un prospect"
+        )
+        self.bouton_ajouter_prospect.setFixedHeight(40)
+        self.bouton_ajouter_prospect.setStyleSheet(
+            self.style_bouton_principal()
+        )
+        self.bouton_ajouter_prospect.setToolTip(
+            "Ajouter manuellement un nouveau prospect."
+        )
+
+        can_create_manually = (
+            self._peut_creer_prospect_manuellement()
+        )
+
+        self.bouton_ajouter_prospect.setVisible(
+            can_create_manually
+        )
+
+        # Le formulaire sera branche dans le sous-lot suivant.
+        # Tant que la creation Local/Cloud n'est pas disponible,
+        # on n'expose pas une action partiellement fonctionnelle.
+        self.bouton_ajouter_prospect.setEnabled(False)
+
         self.bouton_enrichir_selection = QPushButton("↻  Enrichir la sélection")
         self.bouton_enrichir_selection.setFixedHeight(40)
         self.bouton_enrichir_selection.setToolTip(
@@ -294,6 +318,7 @@ class ProspectsPage(QWidget):
         toolbar_layout.addWidget(self.bouton_kanban)
         toolbar_layout.addSpacing(8)
         toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.bouton_ajouter_prospect)
         toolbar_layout.addWidget(self.bouton_enrichir_selection)
         toolbar_layout.addWidget(self.bouton_exporter)
         toolbar_layout.addWidget(bouton_scoring)
@@ -589,6 +614,38 @@ class ProspectsPage(QWidget):
             str(value or "").strip()
             for value in criteres.values()
         )
+
+    @staticmethod
+    def _peut_creer_prospect_manuellement() -> bool:
+        user = SessionState.user()
+
+        if user is None:
+            return False
+
+        role = str(
+            getattr(user, "role", "") or ""
+        ).strip()
+
+        if role == "Commercial":
+            return bool(
+                getattr(
+                    user,
+                    "can_create_prospect_manually",
+                    False,
+                )
+            )
+
+        # Ces roles disposent deja du droit de creation
+        # cote Backend. On preserve leur comportement actuel.
+        if role in {
+            "Administrateur",
+            "Manager",
+            "Assistant administratif",
+            "Dirigeant hors France",
+        }:
+            return True
+
+        return False
 
     def charger_options_filtres(self):
         """
@@ -1481,4 +1538,3 @@ class ProspectsPage(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Erreur export", str(e))
-
