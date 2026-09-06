@@ -51,7 +51,8 @@ def test_commercial_uses_individual_manual_permission():
         "_peut_creer_prospect_manuellement"
     )
 
-    assert 'role == "Commercial"' in segment
+    assert ".casefold()" in segment
+    assert 'role == "commercial"' in segment
     assert (
         "can_create_prospect_manually"
         in segment
@@ -64,10 +65,10 @@ def test_existing_backend_roles_keep_creation_access():
     )
 
     for role in (
-        "Administrateur",
-        "Manager",
-        "Assistant administratif",
-        "Dirigeant hors France",
+        "administrateur",
+        "manager",
+        "assistant administratif",
+        "dirigeant hors france",
     ):
         assert role in segment
 

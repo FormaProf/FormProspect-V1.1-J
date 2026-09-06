@@ -22,7 +22,7 @@ from services.cloud_runtime import CloudRuntime
 
 
 class ManualProspectDialog(QDialog):
-    """Cr?ation manuelle d'un prospect Local ou Cloud."""
+    """Création manuelle d'un prospect Local ou Cloud."""
 
     def __init__(
         self,
@@ -57,8 +57,8 @@ class ManualProspectDialog(QDialog):
         )
 
         subtitle = QLabel(
-            "Cr?ez une nouvelle fiche prospect. "
-            "Le SIRET est obligatoire et doit ?tre unique."
+            "Créez une nouvelle fiche prospect. "
+            "Le SIRET est obligatoire et doit être unique."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(
@@ -84,12 +84,12 @@ class ManualProspectDialog(QDialog):
         self.siret = self._line(
             "14 chiffres"
         )
-        self.contact_first_name = self._line("Pr?nom")
+        self.contact_first_name = self._line("Prénom")
         self.contact_last_name = self._line("Nom")
         self.job_title = self._line(
-            "Ex. G?rant, Dirigeant..."
+            "Ex. Gérant, Dirigeant..."
         )
-        self.phone = self._line("T?l?phone fixe")
+        self.phone = self._line("Téléphone fixe")
         self.mobile = self._line("06 / 07")
         self.email = self._line("contact@entreprise.fr")
         self.website = self._line("https://...")
@@ -111,10 +111,10 @@ class ManualProspectDialog(QDialog):
 
         form.addRow("Entreprise *", self.company_name)
         form.addRow("SIRET *", self.siret)
-        form.addRow("Pr?nom du contact", self.contact_first_name)
+        form.addRow("Prénom du contact", self.contact_first_name)
         form.addRow("Nom du contact", self.contact_last_name)
         form.addRow("Fonction", self.job_title)
-        form.addRow("T?l?phone", self.phone)
+        form.addRow("Téléphone", self.phone)
         form.addRow("Mobile", self.mobile)
         form.addRow("E-mail", self.email)
         form.addRow("Site Internet", self.website)
@@ -234,7 +234,7 @@ class ManualProspectDialog(QDialog):
 
         self.owner_combo.clear()
         self.owner_combo.addItem(
-            "Moi-m?me (Administrateur)",
+            "Moi-même (Administrateur)",
             None,
         )
 
@@ -311,7 +311,7 @@ class ManualProspectDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(
                 self,
-                "Informations ? v?rifier",
+                "Informations à vérifier",
                 str(exc),
             )
             return
@@ -333,14 +333,14 @@ class ManualProspectDialog(QDialog):
 
             if status_code == 409:
                 message = (
-                    "Ce SIRET est d?j? pr?sent dans "
+                    "Ce SIRET est déjà pr?sent dans "
                     "Form@Prospect.\n\n"
-                    "Aucun doublon n'a ?t? cr??."
+                    "Aucun doublon n'a été créé."
                 )
             elif status_code == 403:
                 message = (
-                    "Votre compte n'est pas autoris? "
-                    "? cr?er ou affecter ce prospect."
+                    "Votre compte n'est pas autorisé "
+                    "à créer ou affecter ce prospect."
                 )
             elif status_code == 422:
                 message = (
@@ -354,13 +354,13 @@ class ManualProspectDialog(QDialog):
                 message = str(exc)
             else:
                 message = (
-                    "Le prospect n'a pas pu ?tre cr??.\n\n"
+                    "Le prospect n'a pas pu être créé.\n\n"
                     f"{exc}"
                 )
 
             QMessageBox.warning(
                 self,
-                "Cr?ation impossible",
+                "Création impossible",
                 message,
             )
 

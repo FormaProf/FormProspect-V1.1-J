@@ -358,7 +358,7 @@ class CloudAuthService:
         membership_id: str,
         allowed: bool,
     ) -> dict:
-        """Accorde ou retire le droit individuel de cr?ation manuelle."""
+        """Accorde ou retire le droit individuel de création manuelle."""
 
         if self.current_user is None:
             raise CloudAuthError("Session utilisateur indisponible.")
@@ -372,8 +372,8 @@ class CloudAuthService:
 
         if not isinstance(payload, dict):
             raise CloudAuthError(
-                "Form@Prospect Cloud n'a pas confirm? la modification "
-                "du droit de cr?ation manuelle."
+                "Form@Prospect Cloud n'a pas confirmé la modification "
+                "du droit de création manuelle."
             )
 
         return payload

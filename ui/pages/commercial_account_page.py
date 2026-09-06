@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +24,30 @@ from core.session import SessionState
 from services.auth_service import AuthService
 from ui.components.notifications import NotificationManager
 from ui.utils_profile import circular_avatar
+
+
+def _preserve_cloud_session_identity(local_user, current_user):
+    # Preserve Cloud identity when the local shadow profile is reloaded.
+    if local_user is None or current_user is None:
+        return local_user
+
+    cloud_user_id = str(
+        getattr(current_user, "cloud_user_id", "") or ""
+    ).strip()
+    if not cloud_user_id:
+        return local_user
+
+    return replace(
+        local_user,
+        role=current_user.role,
+        cloud_user_id=current_user.cloud_user_id,
+        organization_id=current_user.organization_id,
+        organization_name=current_user.organization_name,
+        permissions=current_user.permissions,
+        can_create_prospect_manually=(
+            current_user.can_create_prospect_manually
+        ),
+    )
 
 
 class CommercialAccountPage(QWidget):
@@ -259,14 +284,19 @@ class CommercialAccountPage(QWidget):
         return value
 
     def rafraichir(self):
+        current_user = SessionState.user()
         user = (
-            self.auth_service.get_user(SessionState.user().id)
-            if SessionState.user()
+            self.auth_service.get_user(current_user.id)
+            if current_user
             else None
         )
         if not user:
             return
 
+        user = _preserve_cloud_session_identity(
+            user,
+            current_user,
+        )
         SessionState.login(user)
 
         self.avatar.setPixmap(
@@ -442,7 +472,12 @@ class CommercialAccountPage(QWidget):
                 path,
             )
             refreshed = self.auth_service.get_user(user.id)
-            SessionState.login(refreshed)
+            SessionState.login(
+                _preserve_cloud_session_identity(
+                    refreshed,
+                    SessionState.user(),
+                )
+            )
             self.rafraichir()
             self.profile_updated.emit()
 
@@ -472,8 +507,12 @@ class CommercialAccountPage(QWidget):
 
         if answer == QMessageBox.Yes:
             self.auth_service.remove_profile_photo(user.id)
+            refreshed = self.auth_service.get_user(user.id)
             SessionState.login(
-                self.auth_service.get_user(user.id)
+                _preserve_cloud_session_identity(
+                    refreshed,
+                    SessionState.user(),
+                )
             )
             self.rafraichir()
             self.profile_updated.emit()

@@ -627,9 +627,12 @@ class ProspectsPage(QWidget):
 
         role = str(
             getattr(user, "role", "") or ""
-        ).strip()
+        ).strip().casefold()
 
-        if role == "Commercial":
+        # Accepter aussi bien les valeurs métier du Desktop
+        # ("Commercial") que les valeurs internes du Cloud
+        # ("commercial"). Le Backend reste l'autorité finale.
+        if role == "commercial":
             return bool(
                 getattr(
                     user,
@@ -638,13 +641,15 @@ class ProspectsPage(QWidget):
                 )
             )
 
-        # Ces roles disposent deja du droit de creation
-        # cote Backend. On preserve leur comportement actuel.
         if role in {
-            "Administrateur",
-            "Manager",
-            "Assistant administratif",
-            "Dirigeant hors France",
+            "administrateur",
+            "admin",
+            "administrator",
+            "manager",
+            "assistant administratif",
+            "admin_assistant",
+            "dirigeant hors france",
+            "foreign_director",
         }:
             return True
 
@@ -684,10 +689,10 @@ class ProspectsPage(QWidget):
         if not self._peut_creer_prospect_manuellement():
             QMessageBox.warning(
                 self,
-                "Cr?ation non autoris?e",
+                "Création non autorisée",
                 (
-                    "Votre compte n'est pas autoris? ? "
-                    "cr?er des prospects manuellement."
+                    "Votre compte n'est pas autorisé à "
+                    "créer des prospects manuellement."
                 ),
             )
             return
@@ -699,7 +704,7 @@ class ProspectsPage(QWidget):
             parent=self,
         )
 
-        if dialog.exec() == dialog.Accepted:
+        if dialog.exec():
             self.charger_prospects(
                 force_refresh=True
             )
