@@ -10,6 +10,7 @@ from core.session import SessionState
 from services.auth_service import AuthService
 from services.cloud_runtime import CloudRuntime
 from services.commercial_project_workspace_service import CommercialProjectWorkspaceService
+from services.commercial_project_admin_service import CommercialProjectAdminService
 from services.update_service import UpdateError, UpdateService
 from ui.components.notifications import NotificationManager
 from ui.dialogs.about_dialog import AboutDialog
@@ -30,6 +31,7 @@ from ui.pages.trainer_planning_page import TrainerPlanningPage
 from ui.pages.trainer_session_detail_page import TrainerSessionDetailPage
 from ui.pages.commercial_profiles_page import CommercialProfilesPage
 from ui.pages.commercial_projects_page import CommercialProjectsPage
+from ui.pages.admin_commercial_projects_page import AdminCommercialProjectsPage
 from ui.pages.training_cases_page import TrainingCasesPage
 from ui.pages.campaigns_page import CampaignsPage
 from ui.pages.commissions_page import CommissionsPage
@@ -58,6 +60,8 @@ class MainWindow(QMainWindow):
         self.commercial_projects_page = None
         self.commercial_project_workspace_service = None
         self.commercial_user_id = ""
+        self.admin_commercial_project_service = None
+        self.admin_commercial_projects_page = None
 
         if self.is_trainer_space:
             # Le rôle Formateur charge uniquement son espace métier. Les pages
@@ -144,6 +148,14 @@ class MainWindow(QMainWindow):
                     self._ouvrir_projet_commercial_enfant
                 )
 
+            if SessionState.has_role("Administrateur"):
+                print("[MAIN] AdminCommercialProjects", flush=True)
+                self.admin_commercial_project_service = CommercialProjectAdminService(CloudRuntime.api())
+                self.admin_commercial_projects_page = AdminCommercialProjectsPage(
+                    service=self.admin_commercial_project_service,
+                    auto_refresh=False,
+                )
+
             print("[MAIN] AI", flush=True)
             self.ai_assistant_page = AIAssistantPage()
 
@@ -161,6 +173,9 @@ class MainWindow(QMainWindow):
             if self.commercial_projects_page is not None:
                 self.pages.addWidget(self.commercial_projects_page)
 
+            if self.admin_commercial_projects_page is not None:
+                self.pages.addWidget(self.admin_commercial_projects_page)
+
         print("[MAIN] Toutes les pages autorisées créées", flush=True)
 
         layout.addWidget(self.sidebar)
@@ -172,6 +187,10 @@ class MainWindow(QMainWindow):
         if SessionState.has_role("Commercial"):
             self.sidebar.buttons_by_key["commercial_projects"].clicked.connect(
                 self.ouvrir_projets_commerciaux
+            )
+        if SessionState.has_role("Administrateur"):
+            self.sidebar.buttons_by_key["admin_commercial_projects"].clicked.connect(
+                self.ouvrir_admin_projets_commerciaux
             )
         self.sidebar.buttons_by_key["trainer_dashboard"].clicked.connect(self.ouvrir_trainer_dashboard)
         self.sidebar.buttons_by_key["trainer_sessions"].clicked.connect(self.ouvrir_sessions_formateur)
@@ -459,6 +478,15 @@ class MainWindow(QMainWindow):
             return
 
         self.ouvrir_projets_commerciaux()
+
+    def ouvrir_admin_projets_commerciaux(self):
+        if not SessionState.has_role("Administrateur"):
+            return
+        page = getattr(self, "admin_commercial_projects_page", None)
+        if page is None:
+            return
+        page.rafraichir()
+        self.pages.setCurrentWidget(page)
 
     def ouvrir_projets_commerciaux(self):
         self.commercial_projects_page.rafraichir()

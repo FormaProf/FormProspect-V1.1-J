@@ -26,6 +26,7 @@ class Sidebar(QFrame):
     MENU_KEYS = [
         "dashboard",
         "commercial_projects",
+        "admin_commercial_projects",
         "trainer_dashboard",
         "trainer_sessions",
         "trainer_planning",
@@ -268,6 +269,7 @@ class Sidebar(QFrame):
         menus = [
             ("dashboard", "🏠", "Dashboard"),
             ("commercial_projects", "📁", "Mes projets commerciaux"),
+            ("admin_commercial_projects", "📁", "Projets commerciaux"),
             ("trainer_dashboard", "🏠", "Tableau de bord"),
             ("trainer_sessions", "🎓", "Mes formations"),
             ("trainer_planning", "📅", "Mon planning"),
@@ -328,9 +330,9 @@ class Sidebar(QFrame):
         user = SessionState.user()
         role = user.role if user else "Commercial"
         trainer_keys = {"trainer_dashboard", "trainer_sessions", "trainer_planning"}
-        standard_keys = set(self.MENU_KEYS) - trainer_keys - {"commercial_projects"}
+        standard_keys = set(self.MENU_KEYS) - trainer_keys - {"commercial_projects", "admin_commercial_projects"}
         allowed = {
-            "Administrateur": standard_keys,
+            "Administrateur": standard_keys | {"admin_commercial_projects"},
             "Manager": standard_keys - {"trainers", "trainer_availability", "commercial_profiles", "statistics"},
             "Commercial": {"dashboard", "commercial_projects", "crm", "agenda", "campaigns", "sequences", "sales", "documents", "trainer_availability", "training_cases", "ai", "activity", "account"},
             "Formateur": trainer_keys | {"account"},

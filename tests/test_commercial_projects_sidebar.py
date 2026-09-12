@@ -27,3 +27,14 @@ def test_commercial_projects_entry_is_reserved_to_commercial(qapp, monkeypatch):
     for role in ("Administrateur", "Manager", "Formateur"):
         sidebar = build_sidebar(monkeypatch, role)
         assert sidebar.buttons_by_key["commercial_projects"].isHidden()
+
+
+def test_admin_commercial_projects_entry_is_reserved_to_admin(qapp, monkeypatch):
+    admin = build_sidebar(monkeypatch, "Administrateur")
+
+    assert "admin_commercial_projects" in admin.buttons_by_key
+    assert not admin.buttons_by_key["admin_commercial_projects"].isHidden()
+
+    for role in ("Manager", "Commercial", "Formateur"):
+        sidebar = build_sidebar(monkeypatch, role)
+        assert sidebar.buttons_by_key["admin_commercial_projects"].isHidden()
