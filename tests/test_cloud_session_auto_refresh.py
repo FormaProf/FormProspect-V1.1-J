@@ -174,23 +174,23 @@ def test_multipart_reopens_file_and_retries_once(tmp_path):
     assert auth.refresh_calls == 1
     assert bodies == [b"hello", b"hello"]
 
-def _load_auth_module():
+def _load_auth_module(monkeypatch):
     # Minimal stubs for imports not present in the focused audit bundle.
     core_pkg = sys.modules.setdefault("core", types.ModuleType("core"))
     core_session = types.ModuleType("core.session")
     core_session.AuthenticatedUser = type("AuthenticatedUser", (), {})
-    sys.modules["core.session"] = core_session
-    setattr(core_pkg, "session", core_session)
+    monkeypatch.setitem(sys.modules, "core.session", core_session)
+    monkeypatch.setattr(core_pkg, "session", core_session, raising=False)
 
     services_pkg = sys.modules.setdefault("services", types.ModuleType("services"))
     auth_mod = types.ModuleType("services.auth_service")
     auth_mod.AuthService = type("AuthService", (), {})
-    sys.modules["services.auth_service"] = auth_mod
-    setattr(services_pkg, "auth_service", auth_mod)
+    monkeypatch.setitem(sys.modules, "services.auth_service", auth_mod)
+    monkeypatch.setattr(services_pkg, "auth_service", auth_mod, raising=False)
 
     api_module = _load_api_module()
-    sys.modules["services.cloud_api_client"] = api_module
-    setattr(services_pkg, "cloud_api_client", api_module)
+    monkeypatch.setitem(sys.modules, "services.cloud_api_client", api_module)
+    monkeypatch.setattr(services_pkg, "cloud_api_client", api_module, raising=False)
 
     spec = importlib.util.spec_from_file_location(
         "session_refresh_cloud_auth_service", SERVICES / "cloud_auth_service.py"
@@ -203,7 +203,7 @@ def _load_auth_module():
 
 
 def test_accepting_refreshed_token_preserves_organization(monkeypatch):
-    module = _load_auth_module()
+    module = _load_auth_module(monkeypatch)
     service = object.__new__(module.CloudAuthService)
     service.session = module.CloudSession(
         access_token="old",
@@ -229,8 +229,8 @@ def test_accepting_refreshed_token_preserves_organization(monkeypatch):
     assert service.session.organization_id == "org-keep"
 
 
-def test_ensure_session_fresh_refreshes_only_near_expiry():
-    module = _load_auth_module()
+def test_ensure_session_fresh_refreshes_only_near_expiry(monkeypatch):
+    module = _load_auth_module(monkeypatch)
     service = object.__new__(module.CloudAuthService)
     service.current_user = None
     calls = []
