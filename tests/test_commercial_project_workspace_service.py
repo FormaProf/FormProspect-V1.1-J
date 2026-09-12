@@ -63,3 +63,53 @@ def test_assigned_parent_with_no_own_children_stays_empty():
     assert overviews[0].projects == ()
     assert overviews[0].prospect_count == 0
     assert calls[0]["assigned_to"] == "user-florian"
+
+
+def test_initial_navigation_opens_only_child_directly():
+    api = FakeAPI()
+    service = CommercialProjectWorkspaceService(api)
+    parent = SimpleNamespace(name="BTP", projects=(SimpleNamespace(id="btp-1"),))
+
+    decision = service.resolve_initial_navigation([parent])
+
+    assert decision.mode == "open_project"
+    assert decision.project_id == "btp-1"
+
+
+def test_initial_navigation_shows_children_for_single_parent_with_multiple_projects():
+    api = FakeAPI()
+    service = CommercialProjectWorkspaceService(api)
+    parent = SimpleNamespace(
+        id="parent-btp",
+        name="BTP",
+        projects=(SimpleNamespace(id="btp-1"), SimpleNamespace(id="btp-2")),
+    )
+
+    decision = service.resolve_initial_navigation([parent])
+
+    assert decision.mode == "show_children"
+    assert decision.parent_id == "parent-btp"
+
+
+def test_initial_navigation_shows_parent_choice_when_multiple_parents_exist():
+    api = FakeAPI()
+    service = CommercialProjectWorkspaceService(api)
+    parents = [
+        SimpleNamespace(id="parent-btp", name="BTP", projects=(SimpleNamespace(id="btp-1"),)),
+        SimpleNamespace(id="parent-ia", name="IA", projects=(SimpleNamespace(id="ia-1"),)),
+    ]
+
+    decision = service.resolve_initial_navigation(parents)
+
+    assert decision.mode == "show_parents"
+
+
+def test_initial_navigation_stays_empty_when_parent_has_no_children():
+    api = FakeAPI()
+    service = CommercialProjectWorkspaceService(api)
+    parent = SimpleNamespace(id="parent-btp", name="BTP", projects=())
+
+    decision = service.resolve_initial_navigation([parent])
+
+    assert decision.mode == "empty"
+    assert decision.parent_id == "parent-btp"

@@ -8,6 +8,8 @@ from core.constants import *
 from core.paths import resource_path
 from core.session import SessionState
 from services.auth_service import AuthService
+from services.cloud_runtime import CloudRuntime
+from services.commercial_project_workspace_service import CommercialProjectWorkspaceService
 from services.update_service import UpdateError, UpdateService
 from ui.components.notifications import NotificationManager
 from ui.dialogs.about_dialog import AboutDialog
@@ -27,6 +29,7 @@ from ui.pages.trainer_sessions_page import TrainerSessionsPage
 from ui.pages.trainer_planning_page import TrainerPlanningPage
 from ui.pages.trainer_session_detail_page import TrainerSessionDetailPage
 from ui.pages.commercial_profiles_page import CommercialProfilesPage
+from ui.pages.commercial_projects_page import CommercialProjectsPage
 from ui.pages.training_cases_page import TrainingCasesPage
 from ui.pages.campaigns_page import CampaignsPage
 from ui.pages.commissions_page import CommissionsPage
@@ -52,6 +55,9 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
 
         self.is_trainer_space = SessionState.has_role("Formateur")
+        self.commercial_projects_page = None
+        self.commercial_project_workspace_service = None
+        self.commercial_user_id = ""
 
         if self.is_trainer_space:
             # Le rôle Formateur charge uniquement son espace métier. Les pages
@@ -124,6 +130,20 @@ class MainWindow(QMainWindow):
             print("[MAIN] Account", flush=True)
             self.account_page = AccountPage(auth_service)
             self.account_page.profile_updated.connect(self._refresh_connected_profile)
+
+            if SessionState.has_role("Commercial"):
+                user = SessionState.user()
+                self.commercial_user_id = str(getattr(user, "cloud_user_id", "") or "").strip()
+                self.commercial_project_workspace_service = CommercialProjectWorkspaceService(CloudRuntime.api())
+                self.commercial_projects_page = CommercialProjectsPage(
+                    service=self.commercial_project_workspace_service,
+                    user_id=self.commercial_user_id,
+                    auto_refresh=False,
+                )
+                self.commercial_projects_page.project_open_requested.connect(
+                    self._ouvrir_projet_commercial_enfant
+                )
+
             print("[MAIN] AI", flush=True)
             self.ai_assistant_page = AIAssistantPage()
 
@@ -138,6 +158,9 @@ class MainWindow(QMainWindow):
             ):
                 self.pages.addWidget(page)
 
+            if self.commercial_projects_page is not None:
+                self.pages.addWidget(self.commercial_projects_page)
+
         print("[MAIN] Toutes les pages autorisées créées", flush=True)
 
         layout.addWidget(self.sidebar)
@@ -146,6 +169,10 @@ class MainWindow(QMainWindow):
         NotificationManager.configure(self)
 
         self.sidebar.buttons_by_key["dashboard"].clicked.connect(self.ouvrir_dashboard)
+        if SessionState.has_role("Commercial"):
+            self.sidebar.buttons_by_key["commercial_projects"].clicked.connect(
+                self.ouvrir_projets_commerciaux
+            )
         self.sidebar.buttons_by_key["trainer_dashboard"].clicked.connect(self.ouvrir_trainer_dashboard)
         self.sidebar.buttons_by_key["trainer_sessions"].clicked.connect(self.ouvrir_sessions_formateur)
         self.sidebar.buttons_by_key["trainer_planning"].clicked.connect(self.ouvrir_planning_formateur)
@@ -197,6 +224,8 @@ class MainWindow(QMainWindow):
         # ralentir la construction de la fenêtre ni afficher le Dashboard commercial.
         if self.is_trainer_space:
             QTimer.singleShot(1200, self.ouvrir_trainer_dashboard)
+        elif SessionState.has_role("Commercial"):
+            QTimer.singleShot(1200, self._initialiser_navigation_commerciale)
 
     def creer_menus(self):
         menu_compte = self.menuBar().addMenu("Compte")
@@ -348,8 +377,11 @@ class MainWindow(QMainWindow):
     def mettre_a_jour_barre_statut(self):
         try:
             from core.application_state import ApplicationState
-            project = ApplicationState.get_project() if ApplicationState.has_project() else None
-            project_text = project.name if project else "Aucun projet"
+            project_text = (
+                ApplicationState.get_project_name()
+                if ApplicationState.has_project()
+                else "Aucun projet"
+            )
         except Exception:
             project_text = "Aucun projet"
         user = SessionState.user()
@@ -413,6 +445,36 @@ class MainWindow(QMainWindow):
         target = getattr(self, "_trainer_detail_return_page", self.trainer_sessions_page)
         self.mettre_a_jour_barre_statut()
         self.pages.setCurrentWidget(target)
+
+    def _initialiser_navigation_commerciale(self):
+        service = self.commercial_project_workspace_service
+        if service is None:
+            return
+
+        parents = service.list_for_commercial(self.commercial_user_id)
+        decision = service.resolve_initial_navigation(parents)
+
+        if decision.mode == "open_project" and decision.project_id:
+            self._ouvrir_projet_commercial_enfant(decision.project_id)
+            return
+
+        self.ouvrir_projets_commerciaux()
+
+    def ouvrir_projets_commerciaux(self):
+        self.commercial_projects_page.rafraichir()
+        self.pages.setCurrentWidget(self.commercial_projects_page)
+
+    def _ouvrir_projet_commercial_enfant(self, project_id):
+        project_id = str(project_id or "").strip()
+        if not project_id:
+            return
+
+        from core.application_state import ApplicationState
+        from services.cloud_runtime import CloudRuntime
+
+        cloud_project = CloudRuntime.api().get_project(project_id)
+        ApplicationState.set_cloud_project(cloud_project)
+        self.ouvrir_dashboard()
 
     def ouvrir_dashboard(self):
         if SessionState.has_role("Formateur"):

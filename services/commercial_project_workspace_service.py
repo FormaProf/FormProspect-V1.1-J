@@ -13,9 +13,38 @@ class CommercialProjectOverview:
     prospect_count: int
 
 
+@dataclass(frozen=True)
+class CommercialNavigationDecision:
+    mode: str
+    project_id: str | None = None
+    parent_id: str | None = None
+
 class CommercialProjectWorkspaceService:
     def __init__(self, api):
         self.api = api
+
+    def resolve_initial_navigation(self, parents) -> CommercialNavigationDecision:
+        parents = list(parents or [])
+        if not parents:
+            return CommercialNavigationDecision(mode="empty")
+
+        if len(parents) > 1:
+            return CommercialNavigationDecision(mode="show_parents")
+
+        parent = parents[0]
+        projects = tuple(getattr(parent, "projects", ()) or ())
+
+        if len(projects) == 1:
+            project_id = str(getattr(projects[0], "id", "") or "").strip()
+            if project_id:
+                return CommercialNavigationDecision(mode="open_project", project_id=project_id)
+
+        parent_id = str(getattr(parent, "id", "") or "").strip() or None
+
+        if len(projects) > 1:
+            return CommercialNavigationDecision(mode="show_children", parent_id=parent_id)
+
+        return CommercialNavigationDecision(mode="empty", parent_id=parent_id)
 
     def list_for_commercial(self, user_id: str) -> list[CommercialProjectOverview]:
         user_id = str(user_id or "").strip()
