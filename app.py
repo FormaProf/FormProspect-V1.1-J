@@ -22,39 +22,14 @@ from ui.windows.main_window import MainWindow
 
 
 def activate_commercial_cloud_project(user) -> None:
-    """
-    Active automatiquement le projet Cloud le plus récemment mis à jour
-    pour un utilisateur commercial.
-
-    Les administrateurs et managers conservent leur fonctionnement actuel.
-    """
-
+    """Prepare le workspace commercial sans choisir de projet enfant."""
     if user is None:
         return
 
     if user.role != "Commercial":
         return
 
-    cloud_user_id = getattr(user, "cloud_user_id", "") or ""
-
-    if not cloud_user_id:
-        return
-
-    projects_result = CloudRuntime.api().list_projects(
-        assigned_to=cloud_user_id,
-        sort_by="updated_at",
-        sort_direction="desc",
-        limit=100,
-        offset=0,
-    )
-
-    if not projects_result.items:
-        ApplicationState.clear_project()
-        return
-
-    most_recent_project = projects_result.items[0]
-    ApplicationState.set_cloud_project(most_recent_project)
-
+    ApplicationState.clear_project()
 
 def main():
     app = QApplication(sys.argv)
