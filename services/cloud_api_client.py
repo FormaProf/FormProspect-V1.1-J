@@ -490,6 +490,77 @@ class CloudAPIClient:
         )
 
     # ------------------------------------------------------------------
+    # Commercial projects
+    # ------------------------------------------------------------------
+
+    def list_commercial_projects(
+        self,
+        *,
+        include_inactive: bool = False,
+    ) -> list[dict[str, Any]]:
+        payload = self.get_json(
+            "/commercial-projects",
+            params={
+                "include_inactive": str(include_inactive).lower(),
+            },
+        )
+
+        if not isinstance(payload, list):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourne une liste "
+                "de projets commerciaux invalide."
+            )
+
+        return payload
+
+    def get_commercial_project(self, commercial_project_id: str) -> dict:
+        return self.get_json(
+            "/commercial-projects/" + commercial_project_id
+        )
+
+    def create_commercial_project(self, payload: dict) -> dict:
+        return self.post_json(
+            "/commercial-projects",
+            payload,
+        )
+
+    def update_commercial_project(self, commercial_project_id: str, payload: dict) -> dict:
+        return self.patch_json(
+            "/commercial-projects/" + commercial_project_id,
+            payload,
+        )
+
+    def set_commercial_project_status(self, commercial_project_id: str, is_active: bool) -> dict:
+        return self.patch_json(
+            "/commercial-projects/" + commercial_project_id + "/status",
+            {"is_active": is_active},
+        )
+
+    def list_commercial_project_assignments(self, commercial_project_id: str) -> list[dict[str, Any]]:
+        return self.get_json(
+            "/commercial-projects/" + commercial_project_id + "/commercial-assignments"
+        )
+
+    def add_commercial_project_assignment(self, commercial_project_id: str, user_id: str) -> dict:
+        return self.post_json(
+            "/commercial-projects/" + commercial_project_id + "/commercial-assignments",
+            {"user_id": user_id},
+        )
+
+    def remove_commercial_project_assignment(self, commercial_project_id: str, user_id: str) -> None:
+        self.request(
+            "DELETE",
+            "/commercial-projects/" + commercial_project_id + "/commercial-assignments/" + user_id,
+            expected=(204,),
+        )
+
+    def set_project_commercial_parent(self, project_id: str, commercial_project_id: str | None) -> dict:
+        return self.patch_json(
+            "/projects/" + project_id + "/commercial-project",
+            {"commercial_project_id": commercial_project_id},
+        )
+
+    # ------------------------------------------------------------------
     # Projects
     # ------------------------------------------------------------------
 
