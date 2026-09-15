@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from services.cloud_api_client import CloudAPIError
+
 
 @dataclass(frozen=True, slots=True)
 class AdminCommercial:
@@ -17,7 +19,17 @@ class AdminChildProject:
     name: str
     status: str
     commercial_project_id: str | None
+    assigned_to: str | None
 
+
+@dataclass(frozen=True, slots=True)
+class AdminLandingLink:
+    id: str
+    commercial_user_id: str
+    project_id: str
+    organization_id: str
+    token: str
+    is_active: bool
 
 @dataclass(frozen=True, slots=True)
 class AdminParentProject:
@@ -57,6 +69,7 @@ class CommercialProjectAdminService:
             name=str(payload.get("name") or "").strip(),
             status=str(payload.get("status") or "").strip(),
             commercial_project_id=parent_id,
+            assigned_to=str(payload.get("assigned_to") or "").strip() or None,
         )
 
     def load(self) -> CommercialProjectAdminSnapshot:
@@ -104,6 +117,48 @@ class CommercialProjectAdminService:
             commercials=commercials,
             ungrouped_projects=tuple(ungrouped),
         )
+
+    @staticmethod
+    def _landing(payload: dict, commercial_user_id: str) -> AdminLandingLink:
+        return AdminLandingLink(
+            id=str(payload.get("id") or "").strip(),
+            commercial_user_id=str(commercial_user_id or "").strip(),
+            project_id=str(payload.get("project_id") or "").strip(),
+            organization_id=str(payload.get("organization_id") or "").strip(),
+            token=str(payload.get("token") or "").strip(),
+            is_active=bool(payload.get("is_active", False)),
+        )
+
+    def get_landing(
+        self, project_id: str, commercial_user_id: str,
+    ) -> AdminLandingLink | None:
+        try:
+            payload = self.api.get_admin_commercial_landing_link(
+                str(commercial_user_id).strip(),
+                str(project_id).strip(),
+            )
+        except CloudAPIError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return self._landing(payload, commercial_user_id)
+
+    def ensure_landing(self, project_id: str, commercial_user_id: str) -> AdminLandingLink:
+        payload = self.api.ensure_admin_commercial_landing_link(
+            str(commercial_user_id).strip(),
+            str(project_id).strip(),
+        )
+        return self._landing(payload, commercial_user_id)
+
+    def set_landing_active(
+        self, project_id: str, commercial_user_id: str, active: bool,
+    ) -> AdminLandingLink:
+        payload = self.api.set_admin_commercial_landing_link_active(
+            str(commercial_user_id).strip(),
+            str(project_id).strip(),
+            bool(active),
+        )
+        return self._landing(payload, commercial_user_id)
 
     def create_parent(self, name: str, description: str = ""):
         return self.api.create_commercial_project({

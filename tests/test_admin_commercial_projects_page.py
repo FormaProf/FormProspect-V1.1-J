@@ -274,3 +274,132 @@ def test_admin_page_attaches_and_detaches_child_project(qapp, monkeypatch):
 
     assert ("attach", "parent-btp", "child-free") in service.mutations
     assert ("detach", "child-1") in service.mutations
+
+class LandingAwareAdminService(FakeAdminService):
+    def __init__(self, snapshot):
+        super().__init__(snapshot)
+        self.landing_calls = []
+
+    def get_landing(self, project_id, commercial_user_id):
+        self.landing_calls.append((project_id, commercial_user_id))
+        return SimpleNamespace(
+            id="link-1",
+            commercial_user_id=commercial_user_id,
+            project_id=project_id,
+            organization_id="org-1",
+            token="token-abc",
+            is_active=True,
+        )
+
+
+def test_admin_page_displays_landing_for_selected_child_project(qapp, monkeypatch):
+    monkeypatch.setattr(
+        SessionState, "has_role",
+        classmethod(lambda cls, *roles: "Administrateur" in roles),
+    )
+
+    snapshot = build_snapshot()
+    snapshot.parents[0].projects[0].assigned_to = "user-florian"
+
+    service = LandingAwareAdminService(snapshot)
+    page = AdminCommercialProjectsPage(service=service, auto_refresh=False)
+    page.rafraichir()
+
+    page.project_table.selectRow(0)
+    qapp.processEvents()
+
+    assert service.landing_calls[-1] == ("child-1", "user-florian")
+    assert page.landing_commercial_label.text() == "Florian"
+    assert page.landing_status_label.text() == "Actif"
+    assert page.landing_url_edit.text() == (
+        "https://pilotage.forma-prof.fr/"
+        "?organization_id=org-1&token=token-abc"
+    )
+
+def test_admin_page_exposes_landing_controls(qapp):
+    page = AdminCommercialProjectsPage(
+        service=FakeAdminService(build_snapshot()),
+        auto_refresh=False,
+    )
+
+    assert page.create_landing_button.text() == "Créer le lien"
+    assert page.copy_landing_button.text() == "Copier"
+    assert page.open_landing_button.text() == "Ouvrir"
+    assert page.toggle_landing_button.text() == "Désactiver"
+
+def test_admin_page_displays_missing_landing_without_crashing(qapp, monkeypatch):
+    monkeypatch.setattr(
+        SessionState, "has_role",
+        classmethod(lambda cls, *roles: "Administrateur" in roles),
+    )
+    snapshot = build_snapshot()
+    snapshot.parents[0].projects[0].assigned_to = "user-florian"
+    service = FakeAdminService(snapshot)
+    service.get_landing = lambda project_id, commercial_user_id: None
+    page = AdminCommercialProjectsPage(service=service, auto_refresh=False)
+    page.rafraichir()
+    page._project_selection_changed(0, 0, -1, -1)
+    assert page.landing_commercial_label.text() == "Florian"
+    assert page.landing_status_label.text() == "Aucun lien"
+    assert page.landing_url_edit.text() == ""
+
+def test_admin_page_creates_landing_for_selected_child_project(qapp, monkeypatch):
+    monkeypatch.setattr(
+        SessionState, "has_role",
+        classmethod(lambda cls, *roles: "Administrateur" in roles),
+    )
+    snapshot = build_snapshot()
+    snapshot.parents[0].projects[0].assigned_to = "user-florian"
+    service = FakeAdminService(snapshot)
+    calls = []
+    service.get_landing = lambda project_id, commercial_user_id: None
+    service.ensure_landing = lambda project_id, commercial_user_id: calls.append((project_id, commercial_user_id)) or SimpleNamespace(id="link-1", commercial_user_id=commercial_user_id, project_id=project_id, organization_id="org-1", token="token-new", is_active=True)
+    page = AdminCommercialProjectsPage(service=service, auto_refresh=False)
+    page.rafraichir()
+    page.project_table.selectRow(0)
+    page._on_create_landing_clicked()
+    assert calls == [("child-1", "user-florian")]
+    assert page.landing_status_label.text() == "Actif"
+    assert page.landing_url_edit.text() == "https://pilotage.forma-prof.fr/?organization_id=org-1&token=token-new"
+
+def test_admin_page_disables_active_landing(qapp, monkeypatch):
+    monkeypatch.setattr(
+        SessionState, "has_role",
+        classmethod(lambda cls, *roles: "Administrateur" in roles),
+    )
+    snapshot = build_snapshot()
+    snapshot.parents[0].projects[0].assigned_to = "user-florian"
+    service = FakeAdminService(snapshot)
+    calls = []
+    service.get_landing = lambda project_id, commercial_user_id: SimpleNamespace(id="link-1", commercial_user_id=commercial_user_id, project_id=project_id, organization_id="org-1", token="token-abc", is_active=True)
+    service.set_landing_active = lambda project_id, commercial_user_id, active: calls.append((project_id, commercial_user_id, active)) or SimpleNamespace(id="link-1", commercial_user_id=commercial_user_id, project_id=project_id, organization_id="org-1", token="token-abc", is_active=active)
+    page = AdminCommercialProjectsPage(service=service, auto_refresh=False)
+    page.rafraichir()
+    page.project_table.selectRow(0)
+    page._project_selection_changed(0, 0, -1, -1)
+    page._on_toggle_landing_clicked()
+    assert calls == [("child-1", "user-florian", False)]
+    assert page.landing_status_label.text() == "Inactif"
+    assert page.toggle_landing_button.text() == "Activer"
+
+def test_admin_page_copies_landing_url(qapp):
+    page = AdminCommercialProjectsPage(
+        service=FakeAdminService(build_snapshot()),
+        auto_refresh=False,
+    )
+    url = "https://pilotage.forma-prof.fr/?organization_id=org-1&token=token-abc"
+    page.landing_url_edit.setText(url)
+    page._on_copy_landing_clicked()
+    assert qapp.clipboard().text() == url
+
+def test_admin_page_opens_landing_url(qapp, monkeypatch):
+    page = AdminCommercialProjectsPage(
+        service=FakeAdminService(build_snapshot()),
+        auto_refresh=False,
+    )
+    url = "https://pilotage.forma-prof.fr/?organization_id=org-1&token=token-abc"
+    page.landing_url_edit.setText(url)
+    calls = []
+    monkeypatch.setattr(admin_page_module.QDesktopServices, "openUrl", lambda value: calls.append(value.toString()) or True)
+    page._on_open_landing_clicked()
+    assert calls == [url]

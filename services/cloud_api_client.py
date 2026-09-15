@@ -560,6 +560,35 @@ class CloudAPIClient:
             {"commercial_project_id": commercial_project_id},
         )
 
+    def get_admin_commercial_landing_link(
+        self, commercial_user_id: str, project_id: str,
+    ) -> dict:
+        return self.get_json(
+            f"/commercial-landing-links/admin/{commercial_user_id}",
+            params={"project_id": project_id},
+        )
+
+    def ensure_admin_commercial_landing_link(
+        self, commercial_user_id: str, project_id: str,
+    ) -> dict:
+        response = self.request(
+            "PUT",
+            f"/commercial-landing-links/admin/{commercial_user_id}",
+            params={"project_id": project_id},
+        )
+        return response.json()
+
+    def set_admin_commercial_landing_link_active(
+        self, commercial_user_id: str, project_id: str, is_active: bool,
+    ) -> dict:
+        response = self.request(
+            "PATCH",
+            f"/commercial-landing-links/admin/{commercial_user_id}/active",
+            params={"project_id": project_id},
+            json={"is_active": bool(is_active)},
+        )
+        return response.json()
+
     # ------------------------------------------------------------------
     # Projects
     # ------------------------------------------------------------------

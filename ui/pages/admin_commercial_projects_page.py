@@ -1,11 +1,17 @@
 ﻿from __future__ import annotations
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
+
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHeaderView, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHeaderView, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from core.session import SessionState
+
+
+PUBLIC_LANDING_BASE_URL = "https://pilotage.forma-prof.fr/"
 
 
 class ParentProjectDialog(QDialog):
@@ -165,8 +171,43 @@ class AdminCommercialProjectsPage(QWidget):
         self.available_project_count = QLabel("0 projet disponible")
         layout.addWidget(self.available_project_count)
 
+        self.landing_title = QLabel("Landing Page")
+        self.landing_title.setStyleSheet(
+            "font-size:18px; font-weight:700; color:#0B1220;"
+        )
+        layout.addWidget(self.landing_title)
+
+        landing_form = QFormLayout()
+        self.landing_commercial_label = QLabel("—")
+        self.landing_status_label = QLabel("Aucun lien")
+        self.landing_url_edit = QLineEdit()
+        self.landing_url_edit.setReadOnly(True)
+        landing_form.addRow("Commercial", self.landing_commercial_label)
+        landing_form.addRow("Statut", self.landing_status_label)
+        landing_form.addRow("Lien", self.landing_url_edit)
+        layout.addLayout(landing_form)
+
+        landing_actions = QHBoxLayout()
+        self.create_landing_button = QPushButton("Créer le lien")
+        self.create_landing_button.clicked.connect(self._on_create_landing_clicked)
+        self.copy_landing_button = QPushButton("Copier")
+        self.copy_landing_button.clicked.connect(self._on_copy_landing_clicked)
+        self.open_landing_button = QPushButton("Ouvrir")
+        self.open_landing_button.clicked.connect(self._on_open_landing_clicked)
+        self.toggle_landing_button = QPushButton("Désactiver")
+        self.toggle_landing_button.clicked.connect(self._on_toggle_landing_clicked)
+        landing_actions.addWidget(self.create_landing_button)
+        landing_actions.addWidget(self.copy_landing_button)
+        landing_actions.addWidget(self.open_landing_button)
+        landing_actions.addWidget(self.toggle_landing_button)
+        landing_actions.addStretch(1)
+        layout.addLayout(landing_actions)
+
         self.parent_table.currentCellChanged.connect(
             self._parent_selection_changed
+        )
+        self.project_table.currentCellChanged.connect(
+            self._project_selection_changed
         )
 
     @staticmethod
@@ -212,7 +253,152 @@ class AdminCommercialProjectsPage(QWidget):
         if 0 <= row < len(self.parents):
             self._show_parent(self.parents[row])
 
+    def _clear_landing(self):
+        self.landing_commercial_label.setText("—")
+        self.landing_status_label.setText("Aucun lien")
+        self.landing_url_edit.clear()
+
+    def _project_selection_changed(self, row, _column, _old_row, _old_column):
+        parent = self._selected_parent()
+        projects = tuple(parent.projects) if parent else ()
+        if not 0 <= row < len(projects):
+            self._clear_landing()
+            return
+
+        project = projects[row]
+        commercial_user_id = str(
+            getattr(project, "assigned_to", "") or ""
+        ).strip()
+        if not commercial_user_id:
+            self._clear_landing()
+            return
+
+        commercial_name = commercial_user_id
+        if self.snapshot is not None:
+            for commercial in self.snapshot.commercials:
+                if commercial.id == commercial_user_id:
+                    commercial_name = (
+                        commercial.name
+                        or commercial.email
+                        or commercial_user_id
+                    )
+                    break
+
+        self.landing_commercial_label.setText(commercial_name)
+
+        getter = getattr(self.service, "get_landing", None)
+        if getter is None:
+            self.landing_status_label.setText("Aucun lien")
+            self.landing_url_edit.clear()
+            return
+
+        landing = getter(project.id, commercial_user_id)
+        if landing is None:
+            self.landing_status_label.setText("Aucun lien")
+            self.landing_url_edit.clear()
+            return
+
+        self.landing_status_label.setText(
+            "Actif" if landing.is_active else "Inactif"
+        )
+        self.toggle_landing_button.setText(
+            "Désactiver" if landing.is_active else "Activer"
+        )
+        if landing.organization_id and landing.token:
+            self.landing_url_edit.setText(
+                f"{PUBLIC_LANDING_BASE_URL}"
+                f"?organization_id={landing.organization_id}"
+                f"&token={landing.token}"
+            )
+        else:
+            self.landing_url_edit.clear()
+
+    def _on_create_landing_clicked(self, *_args):
+        if not SessionState.has_role("Administrateur"):
+            return
+
+        parent = self._selected_parent()
+        row = self.project_table.currentRow()
+        projects = tuple(parent.projects) if parent else ()
+        if not 0 <= row < len(projects):
+            return
+
+        project = projects[row]
+        commercial_user_id = str(
+            getattr(project, "assigned_to", "") or ""
+        ).strip()
+        if not commercial_user_id:
+            return
+
+        creator = getattr(self.service, "ensure_landing", None)
+        if creator is None:
+            return
+
+        landing = creator(project.id, commercial_user_id)
+        self.landing_status_label.setText(
+            "Actif" if landing.is_active else "Inactif"
+        )
+        if landing.organization_id and landing.token:
+            self.landing_url_edit.setText(
+                f"{PUBLIC_LANDING_BASE_URL}"
+                f"?organization_id={landing.organization_id}"
+                f"&token={landing.token}"
+            )
+        else:
+            self.landing_url_edit.clear()
+
+    def _on_toggle_landing_clicked(self, *_args):
+        if not SessionState.has_role("Administrateur"):
+            return
+
+        parent = self._selected_parent()
+        row = self.project_table.currentRow()
+        projects = tuple(parent.projects) if parent else ()
+        if not 0 <= row < len(projects):
+            return
+
+        project = projects[row]
+        commercial_user_id = str(
+            getattr(project, "assigned_to", "") or ""
+        ).strip()
+        if not commercial_user_id:
+            return
+
+        getter = getattr(self.service, "get_landing", None)
+        setter = getattr(self.service, "set_landing_active", None)
+        if getter is None or setter is None:
+            return
+
+        landing = getter(project.id, commercial_user_id)
+        if landing is None:
+            return
+
+        updated = setter(
+            project.id,
+            commercial_user_id,
+            not landing.is_active,
+        )
+        self.landing_status_label.setText(
+            "Actif" if updated.is_active else "Inactif"
+        )
+        self.toggle_landing_button.setText(
+            "Désactiver" if updated.is_active else "Activer"
+        )
+
+    def _on_copy_landing_clicked(self, *_args):
+        url = self.landing_url_edit.text().strip()
+        if not url:
+            return
+        QApplication.clipboard().setText(url)
+
+    def _on_open_landing_clicked(self, *_args):
+        url = self.landing_url_edit.text().strip()
+        if not url:
+            return
+        QDesktopServices.openUrl(QUrl(url))
+
     def _show_parent(self, parent):
+        self._clear_landing()
         if parent is None:
             self.toggle_parent_button.setText("Désactiver")
         else:
