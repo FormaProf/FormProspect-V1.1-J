@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
+from core.crm import PIPELINE
+from ui.widgets.crm.prospects_table import ProspectsTableWidget
 from services.cloud_api_client import CloudAPIClient, CloudAPIError, PageResult
 from services.cloud_crm_mapping import pipeline_to_api, pipeline_to_ui, priority_to_api, priority_to_ui
 from services.cloud_runtime import CloudRuntime
@@ -74,6 +77,11 @@ def test_cloud_api_client_exposes_backend_error_message():
 def test_desktop_pipeline_and_priority_mapping():
     assert pipeline_to_api("🟣 Proposition envoyée") == "proposition_envoyee"
     assert pipeline_to_ui("gagne") == "🟢 Client"
+    assert pipeline_to_api("🔥 Lead chaud") == "lead_chaud"
+    assert pipeline_to_ui("lead_chaud") == "🔥 Lead chaud"
+    assert pipeline_to_ui("a_contacter") == "🟡 À contacter"
+    assert pipeline_to_ui("contacte") == "🔵 Contacté"
+    assert pipeline_to_ui("rdv_planifie") == "📅 RDV planifié"
     assert priority_to_api("⭐⭐⭐⭐⭐") == "urgente"
     assert priority_to_ui("haute") == "⭐⭐⭐⭐"
 
@@ -92,5 +100,37 @@ def test_cloud_prospect_service_adapts_api_payload_to_existing_table(monkeypatch
     monkeypatch.setattr(CloudRuntime, "api", classmethod(lambda cls: API()))
     rows = ProspectService().rechercher_prospects_filtres(None)
     assert rows[0][0] == "p1"
-    assert rows[0][7] == "🔵 RDV programmé"
+    assert rows[0][7] == "📅 RDV planifié"
     assert rows[0][8] == "⭐⭐⭐⭐"
+
+
+def test_desktop_pipeline_exposes_full_business_stages():
+    expected = [
+        "🟢 Nouveau",
+        "🟡 À contacter",
+        "🔥 Lead chaud",
+        "🔵 Contacté",
+        "📅 RDV planifié",
+        "🟣 Proposition envoyée",
+        "🟠 Négociation",
+        "🟢 Client",
+        "🔴 Perdu",
+    ]
+    assert PIPELINE == expected
+    assert list(ProspectsTableWidget.PIPELINE_ORDER) == expected
+
+
+def test_crm_table_displays_prospect_source():
+    app = QApplication.instance() or QApplication([])
+    table = ProspectsTableWidget()
+    row = (
+        "prospect-1", "Entreprise BTP", "Lille", "59000",
+        "0102030405", "https://example.test", "contact@example.test",
+        "🔥 Lead chaud", "", "Aucune", "", "Florian",
+        75, "★★★★☆", "Bon potentiel", "0612345678",
+        "BTP Florian NUMA IDF-1",
+    )
+    table.afficher_lignes([row])
+    assert table.columnCount() == 16
+    assert table.horizontalHeaderItem(15).text() == "Source"
+    assert table.item(0, 15).text() == "BTP Florian NUMA IDF-1"

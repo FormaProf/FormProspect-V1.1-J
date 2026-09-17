@@ -33,6 +33,10 @@ class PremiumCRMDelegate(QStyledItemDelegate):
 
     PIPELINE_BADGES = {
         "🟢 Nouveau": ("Nouveau", "#ECFDF3", "#166534", "#BBF7D0"),
+        "🟡 À contacter": ("À contacter", "#FFFBEB", "#854D0E", "#FDE68A"),
+        "🔥 Lead chaud": ("Lead chaud", "#FFF7ED", "#9A3412", "#FDBA74"),
+        "🔵 Contacté": ("Contacté", "#EFF6FF", "#1D4ED8", "#BFDBFE"),
+        "📅 RDV planifié": ("RDV planifié", "#EFF8FF", "#075985", "#BAE6FD"),
         "🟡 Qualification": ("Qualification", "#FFFBEB", "#854D0E", "#FDE68A"),
         "🔵 RDV programmé": ("RDV programmé", "#EFF8FF", "#075985", "#BAE6FD"),
         "🟣 Proposition envoyée": ("Proposition envoyée", "#FAF5FF", "#6B21A8", "#E9D5FF"),
@@ -172,12 +176,14 @@ class ProspectsTableWidget(QTableWidget):
 
     PIPELINE_ORDER = {
         "🟢 Nouveau": 1,
-        "🟡 Qualification": 2,
-        "🔵 RDV programmé": 3,
-        "🟣 Proposition envoyée": 4,
-        "🟠 Négociation": 5,
-        "🟢 Client": 6,
-        "🔴 Perdu": 7,
+        "🟡 À contacter": 2,
+        "🔥 Lead chaud": 3,
+        "🔵 Contacté": 4,
+        "📅 RDV planifié": 5,
+        "🟣 Proposition envoyée": 6,
+        "🟠 Négociation": 7,
+        "🟢 Client": 8,
+        "🔴 Perdu": 9,
     }
 
     COLUMN_WIDTHS = {
@@ -196,6 +202,7 @@ class ProspectsTableWidget(QTableWidget):
         12: 145,  # Commercial
         13: 105,  # Score
         14: 120,  # Niveau
+        15: 190,  # Source
     }
 
     def __init__(self):
@@ -204,7 +211,7 @@ class ProspectsTableWidget(QTableWidget):
         self.settings = QSettings("NM FORMATION", "Form@Prospect")
         self._loading_table = False
 
-        self.setColumnCount(15)
+        self.setColumnCount(16)
         self.setHorizontalHeaderLabels([
             "N°",
             "Entreprise",
@@ -221,6 +228,7 @@ class ProspectsTableWidget(QTableWidget):
             "Commercial",
             "Score",
             "Niveau",
+            "Source",
         ])
 
         self.cellDoubleClicked.connect(self._handle_double_click)
@@ -367,6 +375,7 @@ class ProspectsTableWidget(QTableWidget):
             score_prospect = prospect[12] if len(prospect) > 12 and prospect[12] is not None else 0
             score_grade = prospect[13] if len(prospect) > 13 and prospect[13] else "★☆☆☆☆"
             score_label = prospect[14] if len(prospect) > 14 and prospect[14] else "Données insuffisantes"
+            source_prospect = prospect[16] if len(prospect) > 16 and prospect[16] else ""
 
             self.prospect_ids.append(prospect_id)
 
@@ -391,6 +400,7 @@ class ProspectsTableWidget(QTableWidget):
                 self.creer_item(commercial_assigne, str(commercial_assigne or "").lower(), Qt.AlignCenter, prospect_id),
                 self.creer_item(f"{score_prospect}/100", int(score_prospect or 0), Qt.AlignCenter, prospect_id),
                 self.creer_item(score_grade, int(score_prospect or 0), Qt.AlignCenter, prospect_id),
+                self.creer_item(source_prospect, str(source_prospect or "").lower(), Qt.AlignVCenter, prospect_id),
             ]
             items[14].setToolTip(score_label)
 

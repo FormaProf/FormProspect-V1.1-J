@@ -4,6 +4,10 @@ from datetime import datetime
 
 PIPELINE_LABEL_TO_SLUG = {
     "🟢 Nouveau": "nouveau",
+    "🟡 À contacter": "a_contacter",
+    "🔥 Lead chaud": "lead_chaud",
+    "🔵 Contacté": "contacte",
+    "📅 RDV planifié": "rdv_planifie",
     "🟡 Qualification": "contacte",
     "🔵 RDV programmé": "rdv_planifie",
     "🟣 Proposition envoyée": "proposition_envoyee",
@@ -18,9 +22,10 @@ PIPELINE_LABEL_TO_SLUG = {
 }
 PIPELINE_SLUG_TO_LABEL = {
     "nouveau": "🟢 Nouveau",
-    "a_contacter": "🟡 Qualification",
-    "contacte": "🟡 Qualification",
-    "rdv_planifie": "🔵 RDV programmé",
+    "a_contacter": "🟡 À contacter",
+    "lead_chaud": "🔥 Lead chaud",
+    "contacte": "🔵 Contacté",
+    "rdv_planifie": "📅 RDV planifié",
     "proposition_envoyee": "🟣 Proposition envoyée",
     "negociation": "🟠 Négociation",
     "gagne": "🟢 Client",

@@ -1,7 +1,9 @@
 PIPELINE = [
     "🟢 Nouveau",
-    "🟡 Qualification",
-    "🔵 RDV programmé",
+    "🟡 À contacter",
+    "🔥 Lead chaud",
+    "🔵 Contacté",
+    "📅 RDV planifié",
     "🟣 Proposition envoyée",
     "🟠 Négociation",
     "🟢 Client",

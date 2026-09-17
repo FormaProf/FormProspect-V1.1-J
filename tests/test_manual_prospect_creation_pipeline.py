@@ -172,3 +172,20 @@ def test_prospect_service_rejects_invalid_siret_before_provider():
         raise AssertionError(
             "Un SIRET invalide aurait du etre refuse."
         )
+
+
+def test_cloud_provider_keeps_prospect_source_in_crm_row():
+    provider = CloudProspectDataProvider(
+        api_client=object(),
+        project_id="project-123",
+    )
+
+    row = provider._row({
+        "id": "prospect-1",
+        "company_name": "Entreprise BTP",
+        "pipeline_stage": "lead_chaud",
+        "source": "BTP Florian NUMA IDF-1",
+    })
+
+    assert len(row) == 17
+    assert row[16] == "BTP Florian NUMA IDF-1"
