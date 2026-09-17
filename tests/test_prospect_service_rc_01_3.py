@@ -131,6 +131,36 @@ class ProspectServiceTests(unittest.TestCase):
         )
         local_provider.assert_not_called()
 
+
+    def test_cloud_session_without_project_uses_organization_provider(self):
+        service = ProspectService(
+            resolver=FakeResolver(cloud=True),
+            cloud_api_client="api",
+        )
+        provider = FakeProvider()
+
+        with patch(
+            "services.prospect_service.ApplicationState.has_project",
+            return_value=False,
+        ), patch(
+            "services.prospect_service.CloudRuntime.is_active",
+            return_value=True,
+        ), patch(
+            "services.prospect_service.CloudProspectDataProvider",
+            return_value=provider,
+        ) as cloud_provider, patch(
+            "services.prospect_service.LocalProspectDataProvider"
+        ) as local_provider:
+            result = service.recuperer_prospects(limite=50)
+
+        self.assertEqual(result, [("prospect",)])
+        self.assertEqual(service._last_total, 12)
+        cloud_provider.assert_called_once_with(
+            "api",
+            project_id=None,
+        )
+        local_provider.assert_not_called()
+
     def test_pipeline_validation_is_preserved(self):
         service = ProspectService(
             resolver=FakeResolver(cloud=False)
