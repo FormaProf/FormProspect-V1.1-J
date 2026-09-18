@@ -34,12 +34,14 @@ class CRMFiltersBar(QWidget):
         filtres_layout = QHBoxLayout()
         filtres_layout.setSpacing(10)
 
+        self.project_filtre = self.creer_combo_filtre("Projet")
         self.pipeline_filtre = self.creer_combo_filtre("Pipeline")
         self.priorite_filtre = self.creer_combo_filtre("Priorité")
         self.commercial_filtre = self.creer_combo_filtre("Commercial")
         self.ville_filtre = self.creer_combo_filtre("Ville")
 
         for combo in [
+            self.project_filtre,
             self.pipeline_filtre,
             self.priorite_filtre,
             self.commercial_filtre,
@@ -52,6 +54,7 @@ class CRMFiltersBar(QWidget):
         self.bouton_reset.clicked.connect(self.effacer_filtres)
         self.bouton_reset.setStyleSheet(self.style_bouton_reset())
 
+        filtres_layout.addWidget(self.project_filtre)
         filtres_layout.addWidget(self.pipeline_filtre)
         filtres_layout.addWidget(self.priorite_filtre)
         filtres_layout.addWidget(self.commercial_filtre)
@@ -170,6 +173,41 @@ class CRMFiltersBar(QWidget):
 
         combo.blockSignals(False)
 
+    def remplir_projets(
+        self,
+        projets,
+    ):
+        valeur_actuelle = self.project_filtre.currentData()
+        self.project_filtre.blockSignals(True)
+        self.project_filtre.clear()
+        self.project_filtre.addItem("Projet : Tous", self.FILTER_ALL_VALUE)
+
+        for projet in projets or []:
+            if not isinstance(projet, dict):
+                continue
+            project_id = str(projet.get("id") or "").strip()
+            project_name = str(projet.get("name") or "").strip()
+            if project_id and project_name:
+                self.project_filtre.addItem(project_name, project_id)
+
+        index = self.project_filtre.findData(valeur_actuelle)
+        self.project_filtre.setCurrentIndex(index if index >= 0 else 0)
+        self.project_filtre.blockSignals(False)
+
+    def project_id_selectionne(self):
+        return self.valeur_filtre(self.project_filtre)
+
+
+    def selectionner_project_id(self, project_id):
+        valeur = str(project_id or "").strip()
+        index = self.project_filtre.findData(valeur)
+        if index < 0:
+            index = 0
+
+        signals_bloques = self.project_filtre.blockSignals(True)
+        self.project_filtre.setCurrentIndex(index)
+        self.project_filtre.blockSignals(signals_bloques)
+
     def charger_options(self, options, pipelines_ordonnes=None, priorites_ordonnees=None):
         self._updating = True
 
@@ -202,6 +240,7 @@ class CRMFiltersBar(QWidget):
         else:
             priorites = priorites_source
 
+        self.remplir_projets(options.get("projects", []))
         self.remplir_combo(self.pipeline_filtre, "Pipeline", pipelines)
         self.remplir_combo(self.priorite_filtre, "Priorité", priorites)
         self.remplir_combo(
@@ -220,6 +259,7 @@ class CRMFiltersBar(QWidget):
     def effacer_filtres(self):
         self._updating = True
         self.recherche_input.clear()
+        self.project_filtre.setCurrentIndex(0)
         self.pipeline_filtre.setCurrentIndex(0)
         self.priorite_filtre.setCurrentIndex(0)
         self.commercial_filtre.setCurrentIndex(0)

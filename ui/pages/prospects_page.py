@@ -97,6 +97,8 @@ class ProspectsPage(QWidget):
         self._active_workers = set()
         self._load_generation = 0
         self._filter_options_loaded = False
+        self._filter_options_project_id = None
+        self._project_filter_initialized = False
         self._pending_pipeline_changes = set()
 
         self._selection_enrichment_thread = None
@@ -467,6 +469,34 @@ class ProspectsPage(QWidget):
             return context.is_cloud
         return CloudRuntime.is_active()
 
+    def _project_scope_id(self):
+        if getattr(
+            self,
+            "_project_filter_initialized",
+            False,
+        ):
+            selected = (
+                self.filters_bar
+                .project_id_selectionne()
+            )
+            return str(selected or "").strip() or None
+
+        context = self._data_context()
+        if context is None or not context.is_cloud:
+            return None
+
+        return (
+            str(
+                getattr(
+                    context,
+                    "project_id",
+                    "",
+                )
+                or ""
+            ).strip()
+            or None
+        )
+
     def _database_path(self):
         context = self._data_context()
         if context is None:
@@ -722,6 +752,7 @@ class ProspectsPage(QWidget):
             self.prospect_service.invalider_caches(
                 statistiques=True,
                 filtres=True,
+                project_id=self._project_scope_id(),
             )
             self._filter_options_loaded = False
 
@@ -744,9 +775,22 @@ class ProspectsPage(QWidget):
             self.mettre_a_jour_pagination_ui()
             return
 
+        project_id = self._project_scope_id()
+        project_scope_changed = (
+            self._filter_options_loaded
+            and getattr(
+                self,
+                "_filter_options_project_id",
+                None,
+            ) != project_id
+        )
+
         self._lancer_chargement(
             reset_page=reset_page,
-            reload_options=reload_options,
+            reload_options=(
+                reload_options
+                or project_scope_changed
+            ),
         )
 
     def _lancer_chargement(
@@ -756,6 +800,7 @@ class ProspectsPage(QWidget):
         reload_options,
     ):
         database_path = self._database_path()
+        project_id = self._project_scope_id()
         criteres = dict(self.filters_bar.criteres())
 
         if reset_page:
@@ -781,12 +826,18 @@ class ProspectsPage(QWidget):
             if reload_options:
                 options = (
                     self.prospect_service
-                    .recuperer_options_filtres(database_path)
+                    .recuperer_options_filtres(
+                        database_path,
+                        project_id=project_id,
+                    )
                 )
 
             total_general = (
                 self.prospect_service
-                .compter_prospects(database_path)
+                .compter_prospects(
+                    database_path,
+                    project_id=project_id,
+                )
             )
 
             if self._filters_active(criteres):
@@ -794,6 +845,7 @@ class ProspectsPage(QWidget):
                     self.prospect_service
                     .compter_prospects_filtres(
                         database_path,
+                        project_id=project_id,
                         **criteres,
                     )
                 )
@@ -816,6 +868,7 @@ class ProspectsPage(QWidget):
                 self.prospect_service
                 .rechercher_prospects_filtres(
                     database_path,
+                    project_id=project_id,
                     **criteres,
                     limite=self.DISPLAY_LIMIT,
                     offset=offset,
@@ -824,6 +877,7 @@ class ProspectsPage(QWidget):
 
             return {
                 "generation": generation,
+                "project_id": project_id,
                 "options": options,
                 "total_general": total_general,
                 "total_filtered": total_filtered,
@@ -843,7 +897,13 @@ class ProspectsPage(QWidget):
                     pipelines_ordonnes=PIPELINE,
                     priorites_ordonnees=PRIORITES,
                 )
+                if not self._project_filter_initialized:
+                    self.filters_bar.selectionner_project_id(
+                        payload["project_id"]
+                    )
+                    self._project_filter_initialized = True
                 self._filter_options_loaded = True
+                self._filter_options_project_id = payload["project_id"]
 
             self.total_general_courant = payload[
                 "total_general"

@@ -161,6 +161,167 @@ class ProspectServiceTests(unittest.TestCase):
         )
         local_provider.assert_not_called()
 
+
+    def test_cloud_crm_project_scope_switches_provider_cache(self):
+        service = ProspectService(
+            resolver=FakeResolver(cloud=True),
+            cloud_api_client="api",
+        )
+        provider_one = FakeProvider()
+        provider_two = FakeProvider()
+        provider_all = FakeProvider()
+
+        with patch(
+            "services.prospect_service.ApplicationState.has_project",
+            return_value=False,
+        ), patch(
+            "services.prospect_service.CloudRuntime.is_active",
+            return_value=True,
+        ), patch(
+            "services.prospect_service.CloudProspectDataProvider",
+            side_effect=[
+                provider_one,
+                provider_two,
+                provider_all,
+            ],
+        ) as cloud_provider:
+            service.recuperer_prospects(
+                limite=50,
+                project_id="project-1",
+            )
+            service.recuperer_prospects(
+                limite=50,
+                project_id="project-2",
+            )
+            service.recuperer_prospects(
+                limite=50,
+                project_id=None,
+            )
+
+        self.assertEqual(
+            [call.kwargs["project_id"] for call in cloud_provider.call_args_list],
+            ["project-1", "project-2", None],
+        )
+
+    def test_cloud_crm_all_projects_overrides_active_cloud_project(self):
+        service = ProspectService(
+            resolver=FakeResolver(cloud=True),
+            cloud_api_client="api",
+        )
+        provider = FakeProvider()
+
+        with patch(
+            "services.prospect_service.CloudProspectDataProvider",
+            return_value=provider,
+        ) as cloud_provider:
+            service.recuperer_prospects(
+                limite=50,
+                project_id=None,
+            )
+
+        cloud_provider.assert_called_once_with(
+            "api",
+            project_id=None,
+        )
+
+
+    def test_cloud_crm_project_scope_is_used_by_list_counts_and_options(self):
+        service = ProspectService(
+            resolver=FakeResolver(cloud=True),
+            cloud_api_client="api",
+        )
+
+        class ScopedFakeCloudProvider(FakeProvider):
+            calls = []
+
+            def __init__(self, api_client=None, *, project_id=None):
+                super().__init__()
+                self.__class__.calls.append((api_client, project_id))
+
+        with patch(
+            "services.prospect_service.ApplicationState.has_project",
+            return_value=False,
+        ), patch(
+            "services.prospect_service.CloudRuntime.is_active",
+            return_value=True,
+        ), patch(
+            "services.prospect_service.CloudProspectDataProvider",
+            new=ScopedFakeCloudProvider,
+        ):
+            self.assertEqual(
+                service.compter_prospects(
+                    project_id="project-1"
+                ),
+                7,
+            )
+            self.assertEqual(
+                service.compter_prospects_filtres(
+                    recherche="ACME",
+                    project_id="project-1",
+                ),
+                2,
+            )
+            self.assertEqual(
+                service.rechercher_prospects_filtres(
+                    recherche="ACME",
+                    limite=25,
+                    project_id="project-1",
+                ),
+                [("filtre",)],
+            )
+            self.assertEqual(
+                service.recuperer_options_filtres(
+                    project_id="project-1"
+                ),
+                {"pipeline": ["Nouveau"]},
+            )
+
+        self.assertEqual(
+            ScopedFakeCloudProvider.calls,
+            [("api", "project-1")],
+        )
+
+
+    def test_cloud_crm_project_scope_is_used_by_cache_invalidation(self):
+        service = ProspectService(
+            resolver=FakeResolver(cloud=True),
+            cloud_api_client="api",
+        )
+
+        class ScopedFakeCloudProvider(FakeProvider):
+            calls = []
+
+            def __init__(self, api_client=None, *, project_id=None):
+                super().__init__()
+                self._stats_cache = {"cached": True}
+                self._filter_options_cache = {"cached": True}
+                self.__class__.calls.append((api_client, project_id))
+
+        with patch(
+            "services.prospect_service.ApplicationState.has_project",
+            return_value=False,
+        ), patch(
+            "services.prospect_service.CloudRuntime.is_active",
+            return_value=True,
+        ), patch(
+            "services.prospect_service.CloudProspectDataProvider",
+            new=ScopedFakeCloudProvider,
+        ):
+            service.invalider_caches(
+                statistiques=True,
+                filtres=True,
+                project_id="project-1",
+            )
+
+        self.assertEqual(
+            ScopedFakeCloudProvider.calls,
+            [("api", "project-1")],
+        )
+        self.assertIsNone(service._provider_cache._stats_cache)
+        self.assertIsNone(
+            service._provider_cache._filter_options_cache
+        )
+
     def test_pipeline_validation_is_preserved(self):
         service = ProspectService(
             resolver=FakeResolver(cloud=False)

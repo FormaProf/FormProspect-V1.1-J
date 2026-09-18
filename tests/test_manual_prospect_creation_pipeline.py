@@ -189,3 +189,64 @@ def test_cloud_provider_keeps_prospect_source_in_crm_row():
 
     assert len(row) == 17
     assert row[16] == "BTP Florian NUMA IDF-1"
+
+def test_cloud_api_filter_options_keeps_projects():
+    client = object.__new__(CloudAPIClient)
+    captured = {}
+
+    def fake_get_json(path, *, params=None):
+        captured["path"] = path
+        captured["params"] = params
+        return {
+            "pipelines": [],
+            "priorities": [],
+            "cities": [],
+            "owners": [],
+            "projects": [
+                {"id": "project-1", "name": "Projet Alpha"},
+                {"id": "project-2", "name": "Projet Beta"},
+            ],
+        }
+
+    client.get_json = fake_get_json
+
+    result = client.get_prospect_filter_options(
+        project_id="project-1"
+    )
+
+    assert captured == {
+        "path": "/prospects/filter-options",
+        "params": {"project_id": "project-1"},
+    }
+    assert result["projects"] == [
+        {"id": "project-1", "name": "Projet Alpha"},
+        {"id": "project-2", "name": "Projet Beta"},
+    ]
+
+
+def test_cloud_provider_filter_options_keeps_projects():
+    class FakeAPI:
+        def get_prospect_filter_options(self, *, project_id=None):
+            assert project_id == "project-1"
+            return {
+                "pipelines": [],
+                "priorities": [],
+                "cities": [],
+                "owners": [],
+                "projects": [
+                    {"id": "project-1", "name": "Projet Alpha"},
+                    {"id": "project-2", "name": "Projet Beta"},
+                ],
+            }
+
+    provider = CloudProspectDataProvider(
+        api_client=FakeAPI(),
+        project_id="project-1",
+    )
+
+    options = provider.get_filter_options()
+
+    assert options["projects"] == [
+        {"id": "project-1", "name": "Projet Alpha"},
+        {"id": "project-2", "name": "Projet Beta"},
+    ]

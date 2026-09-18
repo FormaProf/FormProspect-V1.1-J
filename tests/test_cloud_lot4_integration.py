@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from core.crm import PIPELINE
 from ui.widgets.crm.prospects_table import ProspectsTableWidget
+from ui.widgets.crm.filters_bar import CRMFiltersBar
 from services.cloud_api_client import CloudAPIClient, CloudAPIError, PageResult
 from services.cloud_crm_mapping import pipeline_to_api, pipeline_to_ui, priority_to_api, priority_to_ui
 from services.cloud_runtime import CloudRuntime
@@ -134,3 +135,78 @@ def test_crm_table_displays_prospect_source():
     assert table.columnCount() == 16
     assert table.horizontalHeaderItem(15).text() == "Source"
     assert table.item(0, 15).text() == "BTP Florian NUMA IDF-1"
+
+
+def test_crm_filters_bar_exposes_project_selector_without_mixing_business_filters():
+    app = QApplication.instance() or QApplication([])
+    filters = CRMFiltersBar()
+
+    filters.charger_options({
+        "pipelines": [],
+        "priorites": [],
+        "commerciaux": [],
+        "villes": [],
+        "projects": [
+            {"id": "project-1", "name": "Projet Alpha"},
+            {"id": "project-2", "name": "Projet Beta"},
+        ],
+    })
+
+    assert filters.project_filtre.count() == 3
+    assert filters.project_filtre.itemText(0) == "Projet : Tous"
+    assert filters.project_filtre.itemData(0) == ""
+    assert filters.project_filtre.itemText(1) == "Projet Alpha"
+    assert filters.project_filtre.itemData(1) == "project-1"
+
+    filters.project_filtre.setCurrentIndex(2)
+    assert filters.project_id_selectionne() == "project-2"
+    assert "project_id" not in filters.criteres()
+
+
+def test_crm_project_selector_emits_change_and_resets_to_all():
+    app = QApplication.instance() or QApplication([])
+    filters = CRMFiltersBar()
+    filters.charger_options({
+        "pipelines": [],
+        "priorites": [],
+        "commerciaux": [],
+        "villes": [],
+        "projects": [
+            {"id": "project-1", "name": "Projet Alpha"},
+            {"id": "project-2", "name": "Projet Beta"},
+        ],
+    })
+
+    emissions = []
+    filters.filters_changed.connect(lambda: emissions.append("changed"))
+
+    filters.project_filtre.setCurrentIndex(1)
+    assert emissions == ["changed"]
+    assert filters.project_id_selectionne() == "project-1"
+
+    filters.effacer_filtres()
+    assert filters.project_id_selectionne() == ""
+    assert filters.project_filtre.currentIndex() == 0
+
+
+def test_crm_project_selector_can_be_initialized_silently():
+    app = QApplication.instance() or QApplication([])
+    filters = CRMFiltersBar()
+    filters.charger_options({
+        "pipelines": [],
+        "priorites": [],
+        "commerciaux": [],
+        "villes": [],
+        "projects": [
+            {"id": "project-1", "name": "Projet Alpha"},
+            {"id": "project-2", "name": "Projet Beta"},
+        ],
+    })
+
+    emissions = []
+    filters.filters_changed.connect(lambda: emissions.append("changed"))
+
+    filters.selectionner_project_id("project-2")
+
+    assert filters.project_id_selectionne() == "project-2"
+    assert emissions == []

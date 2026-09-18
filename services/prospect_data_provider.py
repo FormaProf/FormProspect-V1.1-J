@@ -438,6 +438,17 @@ class CloudProspectDataProvider(ProspectDataProvider):
                 if str(value or "").strip()
             }
         )
+        projects = [
+            {
+                "id": str(item.get("id", "")).strip(),
+                "name": str(item.get("name", "")).strip(),
+            }
+            for item in payload.get("projects", [])
+            if isinstance(item, dict)
+            and str(item.get("id", "")).strip()
+            and str(item.get("name", "")).strip()
+        ]
+
         commercials = sorted(
             {
                 self._owner_name_by_id.get(
@@ -458,6 +469,7 @@ class CloudProspectDataProvider(ProspectDataProvider):
             "priorites": priorities,
             "commerciaux": commercials,
             "villes": cities,
+            "projects": projects,
         }
         self._owner_names_loaded = True
 

@@ -11,6 +11,8 @@ from services.prospect_data_provider import (
 )
 from services.scoring_service import ScoringService
 
+_PROJECT_SCOPE_UNSET = object()
+
 
 class ProspectService:
     """
@@ -78,9 +80,15 @@ class ProspectService:
             or id(project)
         )
 
-    def _provider(self, database_path=None) -> ProspectDataProvider:
+    def _provider(
+        self,
+        database_path=None,
+        *,
+        project_id=_PROJECT_SCOPE_UNSET,
+    ) -> ProspectDataProvider:
         # Un projet local ouvert reste LOCAL même avec une session Cloud.
         # Sans projet local, un commercial connecté travaille sur son CRM Cloud.
+        explicit_project_scope = project_id is not _PROJECT_SCOPE_UNSET
         cloud_project_id = None
 
         if ApplicationState.has_project():
@@ -105,19 +113,40 @@ class ProspectService:
 
                 return self._provider_cache
 
-            cloud_project_id = context.project_id
+            if explicit_project_scope:
+                cloud_project_id = (
+                    str(project_id or "").strip() or None
+                )
+            else:
+                cloud_project_id = context.project_id
+
+            scope_key = (
+                str(cloud_project_id)
+                if cloud_project_id
+                else "organization-session"
+            )
             cache_key = (
                 "cloud",
-                str(context.project_id or self._cloud_project_key(context.project)),
+                scope_key,
                 id(self.cloud_api_client)
                 if self.cloud_api_client is not None
                 else "runtime",
             )
 
         elif CloudRuntime.is_active():
+            if explicit_project_scope:
+                cloud_project_id = (
+                    str(project_id or "").strip() or None
+                )
+
+            scope_key = (
+                str(cloud_project_id)
+                if cloud_project_id
+                else "organization-session"
+            )
             cache_key = (
                 "cloud",
-                "organization-session",
+                scope_key,
                 id(self.cloud_api_client)
                 if self.cloud_api_client is not None
                 else "runtime",
@@ -149,6 +178,7 @@ class ProspectService:
         *,
         statistiques=True,
         filtres=True,
+        project_id=_PROJECT_SCOPE_UNSET,
     ) -> None:
         """
         Invalide les données mises en mémoire sans recréer tout le service.
@@ -157,7 +187,9 @@ class ProspectService:
         une modification de fiche susceptible de changer les compteurs/filtres.
         """
 
-        provider = self._provider()
+        provider = self._provider(
+            project_id=project_id,
+        )
 
         if statistiques and hasattr(
             provider,
@@ -200,9 +232,15 @@ class ProspectService:
             self._last_total,
         )
 
-    def compter_prospects(self, database_path=None):
+    def compter_prospects(
+        self,
+        database_path=None,
+        *,
+        project_id=_PROJECT_SCOPE_UNSET,
+    ):
         return self._provider(
-            database_path
+            database_path,
+            project_id=project_id,
         ).count_all()
 
     def compter_telephones(self, database_path=None):
@@ -228,9 +266,12 @@ class ProspectService:
         priorite="",
         commercial="",
         ville="",
+        *,
+        project_id=_PROJECT_SCOPE_UNSET,
     ):
         return self._provider(
-            database_path
+            database_path,
+            project_id=project_id,
         ).count_filtered(
             recherche=recherche,
             pipeline=pipeline,
@@ -243,8 +284,13 @@ class ProspectService:
         self,
         database_path=None,
         limite=100,
+        *,
+        project_id=_PROJECT_SCOPE_UNSET,
     ):
-        provider = self._provider(database_path)
+        provider = self._provider(
+            database_path,
+            project_id=project_id,
+        )
         result = provider.get_all(limite)
         self._remember_total(provider)
         return result
@@ -273,8 +319,13 @@ class ProspectService:
         ville="",
         limite=100,
         offset=0,
+        *,
+        project_id=_PROJECT_SCOPE_UNSET,
     ):
-        provider = self._provider(database_path)
+        provider = self._provider(
+            database_path,
+            project_id=project_id,
+       )
         result = provider.search_filtered(
             recherche=recherche,
             pipeline=pipeline,
@@ -290,9 +341,12 @@ class ProspectService:
     def recuperer_options_filtres(
         self,
         database_path=None,
+        *,
+        project_id=_PROJECT_SCOPE_UNSET,
     ):
         return self._provider(
-            database_path
+            database_path,
+            project_id=project_id,
         ).get_filter_options()
 
     def recuperer_prospect_par_id(

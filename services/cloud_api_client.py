@@ -400,6 +400,9 @@ class CloudAPIClient:
             "owners": list(
                 payload.get("owners") or []
             ),
+            "projects": list(
+                payload.get("projects") or []
+            ),
         }
 
     def create_prospect(
