@@ -330,6 +330,17 @@ class AdminAccountPage(QWidget):
         )
         self.promote_button.clicked.connect(self._promote_user)
 
+        self.manager_assignment_button = QPushButton(
+            "Affecter un Head of Sales"
+        )
+        self.manager_assignment_button.setObjectName(
+            "SecondaryButton"
+        )
+        self.manager_assignment_button.setEnabled(False)
+        self.manager_assignment_button.setToolTip(
+            "Sélectionnez un commercial actif."
+         )
+
         self.manual_prospect_permission_button = QPushButton(
             "Autoriser la cr\u00e9ation de prospects"
         )
@@ -362,6 +373,10 @@ class AdminAccountPage(QWidget):
         action_row.addWidget(toggle)
         action_row.addWidget(reset)
         action_row.addWidget(self.promote_button)
+        action_row.addWidget(self.manager_assignment_button)
+        self.manager_assignment_button.clicked.connect(
+            self._assign_manager
+        )
         action_row.addWidget(
             self.manual_prospect_permission_button
         )
@@ -394,6 +409,9 @@ class AdminAccountPage(QWidget):
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setWordWrap(False)
         self.table.itemSelectionChanged.connect(self._update_promote_button)
+        self.table.itemSelectionChanged.connect(
+            self._update_manager_assignment_button
+        )
         self.table.itemSelectionChanged.connect(
             self._update_manual_prospect_permission_button
         )
@@ -593,6 +611,10 @@ class AdminAccountPage(QWidget):
                             )
                         ),
                     )
+                    item.setData(
+                        Qt.UserRole + 1,
+                        str(user.get("manager_user_id") or "") or None,
+                    )
 
                 item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
@@ -696,6 +718,7 @@ class AdminAccountPage(QWidget):
         if current_row >= 0 and self.table.isRowHidden(current_row):
             self.table.clearSelection()
         self._update_promote_button()
+        self._update_manager_assignment_button()
         self._update_transfer_button()
 
     def _filter(self, _text=""):
@@ -731,6 +754,11 @@ class AdminAccountPage(QWidget):
             if permission_item is not None
             else False
         )
+        manager_user_id = (
+            str(permission_item.data(Qt.UserRole + 1) or "").strip() or None
+            if permission_item is not None
+            else None
+        )
 
         return {
             "id": cell(0),
@@ -741,6 +769,7 @@ class AdminAccountPage(QWidget):
             "can_create_prospect_manually": (
                 can_create_prospect_manually
             ),
+            "manager_user_id": manager_user_id,
         }
 
     def _selected_user(self):
@@ -779,6 +808,92 @@ class AdminAccountPage(QWidget):
         else:
             self.promote_button.setToolTip(
                 "Sélectionnez un commercial actif à promouvoir en Head of Sales."
+            )
+
+    def _assign_manager(self):
+        details = self._selected_user_details()
+        if details is None:
+            return
+        if details["role"] != "Commercial" or not details["active"]:
+            return
+
+        users = self.auth_service.list_users()
+        managers = [
+            user
+            for user in users
+            if user.get("active") and user.get("role") == "Manager"
+        ]
+
+        labels = ["Aucun"]
+        manager_ids = [None]
+        current_index = 0
+
+        for user in managers:
+            manager_id = str(
+                user.get("user_id")
+                or user.get("cloud_user_id")
+                or ""
+            ).strip()
+            if not manager_id:
+                continue
+
+            full_name = (
+                f"{user.get('first_name') or ''} "
+                f"{user.get('last_name') or ''}"
+            ).strip()
+            label = full_name or str(user.get("email") or manager_id)
+            labels.append(label)
+            manager_ids.append(manager_id)
+
+            if manager_id == details.get("manager_user_id"):
+                current_index = len(labels) - 1
+
+        selected_label, accepted = QInputDialog.getItem(
+            self,
+            "Affecter un Head of Sales",
+            f"Head of Sales de {details['name']} :",
+            labels,
+            current_index,
+            False,
+        )
+        if not accepted:
+            return
+
+        selected_index = labels.index(selected_label)
+        manager_user_id = manager_ids[selected_index]
+        self.auth_service.set_manager(details["id"], manager_user_id)
+        self.rafraichir()
+        NotificationManager.success(
+            "Rattachement mis à jour",
+            f"Le Head of Sales de {details['name']} a été mis à jour.",
+        )
+
+    def _update_manager_assignment_button(self):
+        if not hasattr(self, "manager_assignment_button"):
+            return
+
+        button = self.manager_assignment_button
+
+        if not getattr(self.auth_service, "is_cloud", False):
+            button.setVisible(False)
+            return
+
+        button.setVisible(True)
+        details = self._selected_user_details(show_message=False)
+        enabled = bool(
+            details
+            and details["role"] == "Commercial"
+            and details["active"]
+        )
+        button.setEnabled(enabled)
+
+        if enabled:
+            button.setToolTip(
+              f"Affecter un Head of Sales à {details['name']}."
+            )
+        else:
+            button.setToolTip(
+                "Sélectionnez un commercial actif."
             )
 
     def _update_manual_prospect_permission_button(self):

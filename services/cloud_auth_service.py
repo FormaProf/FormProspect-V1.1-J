@@ -397,6 +397,33 @@ class CloudAuthService:
             )
         return payload
 
+    def set_manager(
+        self,
+        membership_id: str,
+        manager_user_id: str | None,
+    ) -> dict:
+        """Rattache un commercial à un Head of Sales, ou retire ce rattachement."""
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        normalized_manager_id = (
+            str(manager_user_id).strip()
+            if manager_user_id is not None
+            else None
+        )
+        if normalized_manager_id == "":
+            normalized_manager_id = None
+
+        payload = self.api.patch_json(
+            f"/admin/users/{str(membership_id).strip()}",
+            {"manager_user_id": normalized_manager_id},
+        )
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirmé la modification du Head of Sales."
+            )
+        return payload
+
     def reset_password(self, membership_id: str, *_args, **_kwargs) -> None:
         if self.current_user is None:
             raise CloudAuthError("Session utilisateur indisponible.")

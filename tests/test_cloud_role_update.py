@@ -106,3 +106,67 @@ def test_cloud_set_manual_prospect_permission_uses_secure_admin_endpoint(
         },
     }
     assert result["can_create_prospect_manually"] is True
+
+
+def test_cloud_set_manager_uses_secure_admin_endpoint(tmp_path):
+    service = CloudAuthService(AuthService(tmp_path / 'accounts.db'))
+    service.current_user = SimpleNamespace(id='cloud-admin')
+
+    captured = {}
+
+    def fake_patch(path, payload):
+        captured['path'] = path
+        captured['payload'] = payload
+        return {
+            'id': 'membership-commercial',
+            'role': 'commercial',
+            'active': True,
+            'manager_user_id': 'user-manager',
+        }
+
+    service.api.patch_json = fake_patch
+
+    result = service.set_manager(
+        'membership-commercial',
+        'user-manager',
+    )
+
+    assert captured == {
+        'path': '/admin/users/membership-commercial',
+        'payload': {
+            'manager_user_id': 'user-manager',
+        },
+    }
+    assert result['manager_user_id'] == 'user-manager'
+
+
+def test_cloud_set_manager_can_remove_assignment(tmp_path):
+    service = CloudAuthService(AuthService(tmp_path / 'accounts.db'))
+    service.current_user = SimpleNamespace(id='cloud-admin')
+
+    captured = {}
+
+    def fake_patch(path, payload):
+        captured['path'] = path
+        captured['payload'] = payload
+        return {
+            'id': 'membership-commercial',
+            'role': 'commercial',
+            'active': True,
+            'manager_user_id': None,
+        }
+
+    service.api.patch_json = fake_patch
+
+    result = service.set_manager(
+        'membership-commercial',
+        None,
+    )
+
+    assert captured == {
+        'path': '/admin/users/membership-commercial',
+        'payload': {
+            'manager_user_id': None,
+        },
+    }
+    assert result['manager_user_id'] is None
