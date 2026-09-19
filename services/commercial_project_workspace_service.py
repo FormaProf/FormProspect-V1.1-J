@@ -11,6 +11,8 @@ class CommercialProjectOverview:
     name: str
     projects: tuple[CloudProject, ...]
     prospect_count: int
+    lead_chaud_count: int
+    lead_chaud_by_project: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -85,12 +87,25 @@ class CommercialProjectWorkspaceService:
                 for project in projects
             )
 
+            lead_chaud_by_project = {
+                project.id: self.api.list_prospects(
+                    project_id=project.id,
+                    pipeline_stage="lead_chaud",
+                    limit=1,
+                    offset=0,
+                ).total
+                for project in projects
+            }
+            lead_chaud_count = sum(lead_chaud_by_project.values())
+
             overviews.append(
                 CommercialProjectOverview(
                     id=parent_id,
                     name=parent_name,
                     projects=projects,
                     prospect_count=prospect_count,
+                    lead_chaud_count=lead_chaud_count,
+                    lead_chaud_by_project=lead_chaud_by_project,
                 )
             )
 

@@ -72,8 +72,9 @@ class CommercialProjectsPage(QWidget):
                 return
 
         for parent in parents:
+            lead_chaud_count = int(getattr(parent, "lead_chaud_count", 0) or 0)
             button = QPushButton(
-                f"{parent.name}\n{len(parent.projects)} projet(s) - {parent.prospect_count} prospect(s)"
+                f"{parent.name}\n{len(parent.projects)} projet(s) - {parent.prospect_count} prospect(s) - {lead_chaud_count} lead(s) chaud(s)"
             )
             button.setCursor(Qt.PointingHandCursor)
             button.setMinimumHeight(86)
@@ -132,7 +133,11 @@ class CommercialProjectsPage(QWidget):
             if not project_id:
                 continue
             project_name = str(getattr(project, "name", "") or "Projet").strip()
-            button = QPushButton(project_name)
+            prospect_count = int(getattr(project, "prospect_count", 0) or 0)
+            lead_chaud_count = int((getattr(parent, "lead_chaud_by_project", {}) or {}).get(project_id, 0) or 0)
+            button = QPushButton(
+                f"{project_name}\n{prospect_count} prospect(s) - {lead_chaud_count} lead(s) chaud(s)"
+            )
             button.setCursor(Qt.PointingHandCursor)
             button.setMinimumHeight(64)
             button.clicked.connect(lambda _checked=False, pid=project_id: self.project_open_requested.emit(pid))

@@ -16,12 +16,16 @@ class FakeAPI:
 class FakeWindow:
     def __init__(self):
         self.dashboard_opened = 0
+        self.prospects_opened = 0
 
     def ouvrir_dashboard(self):
         self.dashboard_opened += 1
 
+    def ouvrir_prospects(self):
+        self.prospects_opened += 1
 
-def test_commercial_child_activation_sets_cloud_workspace_and_opens_dashboard(monkeypatch):
+
+def test_commercial_child_activation_sets_cloud_workspace_and_opens_crm(monkeypatch):
     api = FakeAPI()
     monkeypatch.setattr(CloudRuntime, "api", lambda: api)
     ApplicationState.clear_project()
@@ -33,7 +37,8 @@ def test_commercial_child_activation_sets_cloud_workspace_and_opens_dashboard(mo
     assert project is not None
     assert project.id == "btp-1"
     assert project.name == "BTP HDF - Florian"
-    assert window.dashboard_opened == 1
+    assert window.prospects_opened == 1
+    assert window.dashboard_opened == 0
     ApplicationState.clear_project()
 
 

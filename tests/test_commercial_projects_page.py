@@ -14,8 +14,8 @@ def qapp():
 class FakeService:
     def list_for_commercial(self, user_id):
         return [
-            SimpleNamespace(id="parent-btp", name="BTP", projects=(), prospect_count=120),
-            SimpleNamespace(id="parent-ia", name="IA", projects=(), prospect_count=50),
+            SimpleNamespace(id="parent-btp", name="BTP", projects=(), prospect_count=120, lead_chaud_count=10),
+            SimpleNamespace(id="parent-ia", name="IA", projects=(), prospect_count=50, lead_chaud_count=2),
         ]
 
 
@@ -24,6 +24,8 @@ def test_page_shows_separate_commercial_parent_cards(qapp):
 
     assert set(page.parent_buttons) == {"parent-btp", "parent-ia"}
     assert page.parent_buttons["parent-btp"].text().find("BTP") >= 0
+    assert "120 prospect(s)" in page.parent_buttons["parent-btp"].text()
+    assert "10 lead(s) chaud(s)" in page.parent_buttons["parent-btp"].text()
     assert page.parent_buttons["parent-ia"].text().find("IA") >= 0
 
 
@@ -139,3 +141,31 @@ def test_empty_parent_among_multiple_parents_shows_empty_state_and_back(qapp):
 
     page.back_button.click()
     assert set(page.parent_buttons) == {"parent-btp", "parent-ia"}
+
+
+def test_child_cards_show_prospect_and_hot_lead_counts(qapp):
+    child_1 = SimpleNamespace(
+        id="btp-1",
+        name="BTP HDF - Florian",
+        prospect_count=100,
+    )
+    child_2 = SimpleNamespace(
+        id="btp-2",
+        name="Landing Page BTP - Florian",
+        prospect_count=20,
+    )
+    parent = SimpleNamespace(
+        id="parent-btp",
+        name="BTP",
+        projects=(child_1, child_2),
+        prospect_count=120,
+        lead_chaud_count=10,
+        lead_chaud_by_project={"btp-1": 7, "btp-2": 3},
+    )
+    service = SimpleNamespace(list_for_commercial=lambda user_id: [parent])
+    page = CommercialProjectsPage(service=service, user_id="user-florian")
+
+    assert "100 prospect(s)" in page.child_buttons["btp-1"].text()
+    assert "7 lead(s) chaud(s)" in page.child_buttons["btp-1"].text()
+    assert "20 prospect(s)" in page.child_buttons["btp-2"].text()
+    assert "3 lead(s) chaud(s)" in page.child_buttons["btp-2"].text()

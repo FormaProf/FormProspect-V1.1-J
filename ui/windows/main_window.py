@@ -502,7 +502,7 @@ class MainWindow(QMainWindow):
 
         cloud_project = CloudRuntime.api().get_project(project_id)
         ApplicationState.set_cloud_project(cloud_project)
-        self.ouvrir_dashboard()
+        self.ouvrir_prospects()
 
     def ouvrir_dashboard(self):
         if SessionState.has_role("Formateur"):
