@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.workspace_state import CloudProject
+from services.cloud_api_client import CloudAPIError
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,14 @@ class CommercialNavigationDecision:
     mode: str
     project_id: str | None = None
     parent_id: str | None = None
+
+@dataclass(frozen=True)
+class CommercialLandingLink:
+    id: str
+    project_id: str
+    organization_id: str
+    token: str
+    is_active: bool
 
 class CommercialProjectWorkspaceService:
     def __init__(self, api):
@@ -47,6 +56,41 @@ class CommercialProjectWorkspaceService:
             return CommercialNavigationDecision(mode="show_children", parent_id=parent_id)
 
         return CommercialNavigationDecision(mode="empty", parent_id=parent_id)
+
+    @staticmethod
+    def _landing(payload: dict) -> CommercialLandingLink:
+        return CommercialLandingLink(
+            id=str(payload.get("id") or "").strip(),
+            project_id=str(payload.get("project_id") or "").strip(),
+            organization_id=str(payload.get("organization_id") or "").strip(),
+            token=str(payload.get("token") or "").strip(),
+            is_active=bool(payload.get("is_active", False)),
+        )
+
+    def get_landing(self, project_id: str) -> CommercialLandingLink | None:
+        project_id = str(project_id or "").strip()
+        try:
+            payload = self.api.get_my_commercial_landing_link(project_id)
+        except CloudAPIError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return self._landing(payload)
+
+    def ensure_landing(self, project_id: str) -> CommercialLandingLink:
+        project_id = str(project_id or "").strip()
+        payload = self.api.ensure_my_commercial_landing_link(project_id)
+        return self._landing(payload)
+
+    def set_landing_active(
+        self, project_id: str, active: bool,
+    ) -> CommercialLandingLink:
+        project_id = str(project_id or "").strip()
+        payload = self.api.set_my_commercial_landing_link_active(
+            project_id,
+            bool(active),
+        )
+        return self._landing(payload)
 
     def list_for_manager(self) -> list[CommercialProjectOverview]:
         parents = self.api.list_commercial_projects()

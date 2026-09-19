@@ -596,6 +596,38 @@ class CloudAPIClient:
     # Projects
     # ------------------------------------------------------------------
 
+    def get_my_commercial_landing_link(
+        self, project_id: str,
+    ) -> dict:
+        return self.get_json(
+            "/commercial-landing-links/me",
+            params={"project_id": str(project_id).strip()},
+        )
+
+    def ensure_my_commercial_landing_link(
+        self, project_id: str,
+    ) -> dict:
+        response = self.request(
+            "PUT",
+            "/commercial-landing-links/me",
+            params={"project_id": str(project_id).strip()},
+        )
+        return response.json()
+
+    def set_my_commercial_landing_link_active(
+        self, project_id: str, is_active: bool,
+    ) -> dict:
+        response = self.request(
+            "PATCH",
+            "/commercial-landing-links/me/active",
+            params={"project_id": str(project_id).strip()},
+            json={"is_active": bool(is_active)},
+        )
+        return response.json()
+
+    def list_my_commercial_landing_projects(self) -> list[dict[str, Any]]:
+        return self.get_json("/commercial-landing-links/me/projects")
+
     def list_projects(
         self,
         **params,

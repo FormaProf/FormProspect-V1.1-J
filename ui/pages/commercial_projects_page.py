@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QApplication, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QVBoxLayout, QWidget,
+)
 
 
 class CommercialProjectsPage(QWidget):
@@ -25,6 +29,9 @@ class CommercialProjectsPage(QWidget):
         )
         self.parent_buttons = {}
         self.child_buttons = {}
+        self.landing_buttons = {}
+        self._landing_project_id = ""
+        self._current_landing = None
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(34, 30, 34, 42)
@@ -58,8 +65,112 @@ class CommercialProjectsPage(QWidget):
         self.back_button.clicked.connect(self.rafraichir)
         self.layout.addWidget(self.back_button)
 
+        self._build_landing_panel()
+
         if auto_refresh:
             self.rafraichir()
+
+    def _build_landing_panel(self):
+        self.landing_panel = QWidget()
+        panel_layout = QVBoxLayout(self.landing_panel)
+        panel_layout.setContentsMargins(0, 18, 0, 0)
+        panel_layout.setSpacing(10)
+
+        self.landing_title_label = QLabel("Ma Landing Page")
+        panel_layout.addWidget(self.landing_title_label)
+
+        self.landing_status_label = QLabel("Aucun lien")
+        panel_layout.addWidget(self.landing_status_label)
+
+        self.landing_url_edit = QLineEdit()
+        self.landing_url_edit.setReadOnly(True)
+        panel_layout.addWidget(self.landing_url_edit)
+
+        actions = QHBoxLayout()
+        self.create_landing_button = QPushButton("Créer mon lien")
+        self.copy_landing_button = QPushButton("Copier")
+        self.open_landing_button = QPushButton("Ouvrir")
+        self.toggle_landing_button = QPushButton("Désactiver")
+
+        self.create_landing_button.clicked.connect(self._on_create_landing_clicked)
+        self.copy_landing_button.clicked.connect(self._on_copy_landing_clicked)
+        self.open_landing_button.clicked.connect(self._on_open_landing_clicked)
+        self.toggle_landing_button.clicked.connect(self._on_toggle_landing_clicked)
+
+        actions.addWidget(self.create_landing_button)
+        actions.addWidget(self.copy_landing_button)
+        actions.addWidget(self.open_landing_button)
+        actions.addWidget(self.toggle_landing_button)
+        actions.addStretch(1)
+        panel_layout.addLayout(actions)
+
+        self.landing_panel.hide()
+        self.layout.addWidget(self.landing_panel)
+
+    @staticmethod
+    def _landing_public_url(landing):
+        organization_id = str(getattr(landing, "organization_id", "") or "").strip()
+        token = str(getattr(landing, "token", "") or "").strip()
+        if not organization_id or not token:
+            return ""
+        return (
+            "https://pilotage.forma-prof.fr/"
+            f"?organization_id={organization_id}&token={token}"
+        )
+
+    def _render_landing(self, landing):
+        self._current_landing = landing
+        self.landing_panel.show()
+
+        if landing is None:
+            self.landing_status_label.setText("Aucun lien")
+            self.landing_url_edit.clear()
+            self.create_landing_button.setEnabled(True)
+            self.copy_landing_button.setEnabled(False)
+            self.open_landing_button.setEnabled(False)
+            self.toggle_landing_button.setEnabled(False)
+            return
+
+        self.landing_status_label.setText("Actif" if landing.is_active else "Inactif")
+        self.landing_url_edit.setText(self._landing_public_url(landing))
+        self.toggle_landing_button.setText("Désactiver" if landing.is_active else "Activer")
+        self.create_landing_button.setEnabled(False)
+        has_url = bool(self.landing_url_edit.text().strip())
+        self.copy_landing_button.setEnabled(has_url)
+        self.open_landing_button.setEnabled(has_url)
+        self.toggle_landing_button.setEnabled(True)
+
+    def _show_landing(self, project_id):
+        project_id = str(project_id or "").strip()
+        if not project_id or self.workspace_mode != "commercial":
+            return
+        self._landing_project_id = project_id
+        self._render_landing(self.service.get_landing(project_id))
+
+    def _on_create_landing_clicked(self, *_args):
+        if not self._landing_project_id:
+            return
+        landing = self.service.ensure_landing(self._landing_project_id)
+        self._render_landing(landing)
+
+    def _on_toggle_landing_clicked(self, *_args):
+        if not self._landing_project_id or self._current_landing is None:
+            return
+        landing = self.service.set_landing_active(
+            self._landing_project_id,
+            not self._current_landing.is_active,
+        )
+        self._render_landing(landing)
+
+    def _on_copy_landing_clicked(self, *_args):
+        url = self.landing_url_edit.text().strip()
+        if url:
+            QApplication.clipboard().setText(url)
+
+    def _on_open_landing_clicked(self, *_args):
+        url = self.landing_url_edit.text().strip()
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def rafraichir(self):
         self.back_button.hide()
@@ -72,6 +183,14 @@ class CommercialProjectsPage(QWidget):
             self.layout.removeWidget(button)
             button.deleteLater()
         self.child_buttons.clear()
+
+        for button in self.landing_buttons.values():
+            self.layout.removeWidget(button)
+            button.deleteLater()
+        self.landing_buttons.clear()
+        self._landing_project_id = ""
+        self._current_landing = None
+        self.landing_panel.hide()
 
         if self.workspace_mode == "manager":
             parents = self.service.list_for_manager()
@@ -107,6 +226,18 @@ class CommercialProjectsPage(QWidget):
             button.clicked.connect(lambda _checked=False, current_parent=parent: self._on_parent_clicked(current_parent))
             self.parent_buttons[parent.id] = button
             self.layout.addWidget(button)
+
+            projects = tuple(getattr(parent, "projects", ()) or ())
+            if self.workspace_mode == "commercial" and len(projects) == 1:
+                project_id = str(getattr(projects[0], "id", "") or "").strip()
+                if project_id:
+                    landing_button = QPushButton("Ma Landing Page")
+                    landing_button.setCursor(Qt.PointingHandCursor)
+                    landing_button.clicked.connect(
+                        lambda _checked=False, pid=project_id: self._show_landing(pid)
+                    )
+                    self.landing_buttons[project_id] = landing_button
+                    self.layout.addWidget(landing_button)
 
 
     def _on_parent_clicked(self, parent):
@@ -165,3 +296,12 @@ class CommercialProjectsPage(QWidget):
             button.clicked.connect(lambda _checked=False, pid=project_id: self.project_open_requested.emit(pid))
             self.child_buttons[project_id] = button
             self.layout.addWidget(button)
+
+            if self.workspace_mode == "commercial":
+                landing_button = QPushButton("Ma Landing Page")
+                landing_button.setCursor(Qt.PointingHandCursor)
+                landing_button.clicked.connect(
+                    lambda _checked=False, pid=project_id: self._show_landing(pid)
+                )
+                self.landing_buttons[project_id] = landing_button
+                self.layout.addWidget(landing_button)
