@@ -106,7 +106,6 @@ def test_active_landing_panel_shows_status_and_public_url(qapp):
         "https://pilotage.forma-prof.fr/"
         "?organization_id=org-1&token=token-1"
     )
-    assert page.toggle_landing_button.text() == "Désactiver"
 
 
 def test_missing_landing_can_be_created(qapp):
@@ -128,7 +127,7 @@ def test_missing_landing_can_be_created(qapp):
     assert "organization_id=org-1" in page.landing_url_edit.text()
 
 
-def test_landing_can_be_deactivated_and_reactivated(qapp):
+def test_commercial_cannot_activate_or_deactivate_own_landing(qapp):
     service = FakeLandingService(active_landing())
     page = CommercialProjectsPage(
         service=service,
@@ -136,18 +135,10 @@ def test_landing_can_be_deactivated_and_reactivated(qapp):
     )
 
     page.landing_buttons["btp-1"].click()
-    page.toggle_landing_button.click()
 
-    assert ("active", "btp-1", False) in service.calls
-    assert page.landing_status_label.text() == "Inactif"
-    assert page.toggle_landing_button.text() == "Activer"
-
-    page.toggle_landing_button.click()
-
-    assert ("active", "btp-1", True) in service.calls
     assert page.landing_status_label.text() == "Actif"
-    assert page.toggle_landing_button.text() == "Désactiver"
-
+    assert not hasattr(page, "toggle_landing_button")
+    assert not any(call[0] == "active" for call in service.calls)
 
 def test_manager_workspace_does_not_expose_personal_landing_actions(qapp):
     class ManagerService:

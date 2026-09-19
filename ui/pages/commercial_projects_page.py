@@ -90,17 +90,14 @@ class CommercialProjectsPage(QWidget):
         self.create_landing_button = QPushButton("Créer mon lien")
         self.copy_landing_button = QPushButton("Copier")
         self.open_landing_button = QPushButton("Ouvrir")
-        self.toggle_landing_button = QPushButton("Désactiver")
 
         self.create_landing_button.clicked.connect(self._on_create_landing_clicked)
         self.copy_landing_button.clicked.connect(self._on_copy_landing_clicked)
         self.open_landing_button.clicked.connect(self._on_open_landing_clicked)
-        self.toggle_landing_button.clicked.connect(self._on_toggle_landing_clicked)
 
         actions.addWidget(self.create_landing_button)
         actions.addWidget(self.copy_landing_button)
         actions.addWidget(self.open_landing_button)
-        actions.addWidget(self.toggle_landing_button)
         actions.addStretch(1)
         panel_layout.addLayout(actions)
 
@@ -128,17 +125,14 @@ class CommercialProjectsPage(QWidget):
             self.create_landing_button.setEnabled(True)
             self.copy_landing_button.setEnabled(False)
             self.open_landing_button.setEnabled(False)
-            self.toggle_landing_button.setEnabled(False)
             return
 
         self.landing_status_label.setText("Actif" if landing.is_active else "Inactif")
         self.landing_url_edit.setText(self._landing_public_url(landing))
-        self.toggle_landing_button.setText("Désactiver" if landing.is_active else "Activer")
         self.create_landing_button.setEnabled(False)
         has_url = bool(self.landing_url_edit.text().strip())
         self.copy_landing_button.setEnabled(has_url)
         self.open_landing_button.setEnabled(has_url)
-        self.toggle_landing_button.setEnabled(True)
 
     def _show_landing(self, project_id):
         project_id = str(project_id or "").strip()
@@ -151,15 +145,6 @@ class CommercialProjectsPage(QWidget):
         if not self._landing_project_id:
             return
         landing = self.service.ensure_landing(self._landing_project_id)
-        self._render_landing(landing)
-
-    def _on_toggle_landing_clicked(self, *_args):
-        if not self._landing_project_id or self._current_landing is None:
-            return
-        landing = self.service.set_landing_active(
-            self._landing_project_id,
-            not self._current_landing.is_active,
-        )
         self._render_landing(landing)
 
     def _on_copy_landing_clicked(self, *_args):
