@@ -333,10 +333,27 @@ class Sidebar(QFrame):
         standard_keys = set(self.MENU_KEYS) - trainer_keys - {"commercial_projects", "admin_commercial_projects"}
         allowed = {
             "Administrateur": standard_keys | {"admin_commercial_projects"},
-            "Manager": standard_keys - {"trainers", "trainer_availability", "commercial_profiles", "statistics"},
+            "Manager": (standard_keys | {"commercial_projects"}) - {"trainers", "trainer_availability", "commercial_profiles", "statistics"},
             "Commercial": {"dashboard", "commercial_projects", "crm", "agenda", "campaigns", "sequences", "sales", "documents", "trainer_availability", "training_cases", "ai", "activity", "account"},
             "Formateur": trainer_keys | {"account"},
         }.get(role, {"dashboard", "crm", "account"})
+
+        commercial_projects_button = self.buttons_by_key.get("commercial_projects")
+        if commercial_projects_button is not None:
+            if role == "Manager":
+                commercial_projects_button.setText(
+                    commercial_projects_button.text().replace(
+                        "Mes projets commerciaux",
+                        "Projets de mon équipe",
+                    )
+                )
+            else:
+                commercial_projects_button.setText(
+                    commercial_projects_button.text().replace(
+                        "Projets de mon équipe",
+                        "Mes projets commerciaux",
+                    )
+                )
 
         for key, button in self.buttons_by_key.items():
             button.setVisible(key in allowed)

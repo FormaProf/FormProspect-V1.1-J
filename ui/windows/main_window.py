@@ -135,18 +135,7 @@ class MainWindow(QMainWindow):
             self.account_page = AccountPage(auth_service)
             self.account_page.profile_updated.connect(self._refresh_connected_profile)
 
-            if SessionState.has_role("Commercial"):
-                user = SessionState.user()
-                self.commercial_user_id = str(getattr(user, "cloud_user_id", "") or "").strip()
-                self.commercial_project_workspace_service = CommercialProjectWorkspaceService(CloudRuntime.api())
-                self.commercial_projects_page = CommercialProjectsPage(
-                    service=self.commercial_project_workspace_service,
-                    user_id=self.commercial_user_id,
-                    auto_refresh=False,
-                )
-                self.commercial_projects_page.project_open_requested.connect(
-                    self._ouvrir_projet_commercial_enfant
-                )
+            self._initialiser_espace_projets_commerciaux()
 
             if SessionState.has_role("Administrateur"):
                 print("[MAIN] AdminCommercialProjects", flush=True)
@@ -184,7 +173,7 @@ class MainWindow(QMainWindow):
         NotificationManager.configure(self)
 
         self.sidebar.buttons_by_key["dashboard"].clicked.connect(self.ouvrir_dashboard)
-        if SessionState.has_role("Commercial"):
+        if SessionState.has_role("Commercial", "Manager"):
             self.sidebar.buttons_by_key["commercial_projects"].clicked.connect(
                 self.ouvrir_projets_commerciaux
             )
@@ -464,6 +453,32 @@ class MainWindow(QMainWindow):
         target = getattr(self, "_trainer_detail_return_page", self.trainer_sessions_page)
         self.mettre_a_jour_barre_statut()
         self.pages.setCurrentWidget(target)
+
+    def _initialiser_espace_projets_commerciaux(self):
+        if not SessionState.has_role("Commercial", "Manager"):
+            return
+
+        user = SessionState.user()
+        self.commercial_user_id = str(
+            getattr(user, "cloud_user_id", "") or ""
+        ).strip()
+        self.commercial_project_workspace_service = (
+            CommercialProjectWorkspaceService(CloudRuntime.api())
+        )
+        workspace_mode = (
+            "manager"
+            if SessionState.has_role("Manager")
+            else "commercial"
+        )
+        self.commercial_projects_page = CommercialProjectsPage(
+            service=self.commercial_project_workspace_service,
+            user_id=self.commercial_user_id,
+            workspace_mode=workspace_mode,
+            auto_refresh=False,
+        )
+        self.commercial_projects_page.project_open_requested.connect(
+            self._ouvrir_projet_commercial_enfant
+        )
 
     def _initialiser_navigation_commerciale(self):
         service = self.commercial_project_workspace_service

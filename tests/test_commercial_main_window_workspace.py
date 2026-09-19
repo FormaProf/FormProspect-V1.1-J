@@ -143,3 +143,74 @@ def test_status_bar_displays_active_cloud_project(monkeypatch):
 
     assert "BTP HDF - Florian" in status.message
     ApplicationState.clear_project()
+
+
+def test_manager_workspace_is_created_in_team_mode(monkeypatch):
+    from types import SimpleNamespace
+
+    import ui.windows.main_window as main_window_module
+    from core.session import SessionState
+
+    monkeypatch.setattr(
+        SessionState,
+        "has_role",
+        classmethod(lambda cls, *roles: "Manager" in roles),
+    )
+    monkeypatch.setattr(
+        SessionState,
+        "user",
+        classmethod(
+            lambda cls: SimpleNamespace(cloud_user_id="user-manager")
+        ),
+    )
+
+    fake_api = object()
+    monkeypatch.setattr(
+        main_window_module.CloudRuntime,
+        "api",
+        staticmethod(lambda: fake_api),
+    )
+
+    created = {}
+
+    class FakeWorkspaceService:
+        def __init__(self, api):
+            created["api"] = api
+
+    class FakeSignal:
+        def connect(self, callback):
+            created["callback"] = callback
+
+    class FakePage:
+        def __init__(self, *, service, user_id, workspace_mode="commercial", auto_refresh=True):
+            created["service"] = service
+            created["user_id"] = user_id
+            created["workspace_mode"] = workspace_mode
+            created["auto_refresh"] = auto_refresh
+            self.project_open_requested = FakeSignal()
+
+    monkeypatch.setattr(
+        main_window_module,
+        "CommercialProjectWorkspaceService",
+        FakeWorkspaceService,
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "CommercialProjectsPage",
+        FakePage,
+    )
+
+    window = SimpleNamespace(
+        commercial_projects_page=None,
+        commercial_project_workspace_service=None,
+        commercial_user_id="",
+        _ouvrir_projet_commercial_enfant=lambda project_id: None,
+    )
+
+    MainWindow._initialiser_espace_projets_commerciaux(window)
+
+    assert created["api"] is fake_api
+    assert created["user_id"] == "user-manager"
+    assert created["workspace_mode"] == "manager"
+    assert created["auto_refresh"] is False
+    assert window.commercial_projects_page is not None

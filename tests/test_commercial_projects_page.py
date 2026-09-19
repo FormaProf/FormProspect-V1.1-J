@@ -169,3 +169,25 @@ def test_child_cards_show_prospect_and_hot_lead_counts(qapp):
     assert "7 lead(s) chaud(s)" in page.child_buttons["btp-1"].text()
     assert "20 prospect(s)" in page.child_buttons["btp-2"].text()
     assert "3 lead(s) chaud(s)" in page.child_buttons["btp-2"].text()
+
+def test_manager_page_uses_team_scope_and_manager_title(qapp):
+    calls = []
+
+    class FakeManagerService:
+        def list_for_manager(self):
+            calls.append("manager")
+            return []
+
+        def list_for_commercial(self, user_id):
+            raise AssertionError(
+                "La vue Manager ne doit pas appeler list_for_commercial()."
+            )
+
+    page = CommercialProjectsPage(
+        service=FakeManagerService(),
+        user_id="user-manager",
+        workspace_mode="manager",
+    )
+
+    assert calls == ["manager"]
+    assert page.title_label.text() == "Projets de mon équipe"

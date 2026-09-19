@@ -147,3 +147,33 @@ def test_initial_navigation_stays_empty_when_parent_has_no_children():
 
     assert decision.mode == "empty"
     assert decision.parent_id == "parent-btp"
+
+
+def test_manager_overviews_trust_backend_visible_projects_without_local_assignment_filter():
+    api = FakeAPI()
+    service = CommercialProjectWorkspaceService(api)
+
+    overviews = service.list_for_manager()
+
+    assert [item.name for item in overviews] == ["BTP", "IA"]
+    by_name = {item.name: item for item in overviews}
+
+    assert [project.name for project in by_name["BTP"].projects] == [
+        "BTP HDF - Florian",
+        "Landing Page BTP - Florian",
+        "BTP IDF - Marc",
+    ]
+    assert by_name["BTP"].prospect_count == 1119
+    assert by_name["BTP"].lead_chaud_count == 109
+
+    assert [project.name for project in by_name["IA"].projects] == [
+        "IA HDF - Florian",
+    ]
+    assert by_name["IA"].prospect_count == 50
+    assert by_name["IA"].lead_chaud_count == 2
+
+    assert "assigned_to" not in api.project_calls[0]
+    assert [
+        call["project_id"]
+        for call in api.prospect_calls
+    ] == ["btp-1", "btp-landing", "btp-marc", "ia-1"]

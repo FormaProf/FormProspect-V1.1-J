@@ -7,10 +7,22 @@ from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 class CommercialProjectsPage(QWidget):
     project_open_requested = Signal(str)
 
-    def __init__(self, *, service, user_id: str, auto_refresh: bool = True):
+    def __init__(
+        self,
+        *,
+        service,
+        user_id: str,
+        workspace_mode: str = "commercial",
+        auto_refresh: bool = True,
+    ):
         super().__init__()
         self.service = service
         self.user_id = str(user_id or "").strip()
+        self.workspace_mode = (
+            "manager"
+            if str(workspace_mode or "").strip().lower() == "manager"
+            else "commercial"
+        )
         self.parent_buttons = {}
         self.child_buttons = {}
 
@@ -18,9 +30,16 @@ class CommercialProjectsPage(QWidget):
         self.layout.setContentsMargins(34, 30, 34, 42)
         self.layout.setSpacing(14)
 
-        title = QLabel("Mes projets commerciaux")
-        title.setStyleSheet("font-size:28px; font-weight:800; color:#0B1220;")
-        self.layout.addWidget(title)
+        title_text = (
+            "Projets de mon équipe"
+            if self.workspace_mode == "manager"
+            else "Mes projets commerciaux"
+        )
+        self.title_label = QLabel(title_text)
+        self.title_label.setStyleSheet(
+            "font-size:28px; font-weight:800; color:#0B1220;"
+        )
+        self.layout.addWidget(self.title_label)
 
         subtitle = QLabel("Choisissez votre univers commercial puis le projet sur lequel vous souhaitez travailler.")
         subtitle.setWordWrap(True)
@@ -54,7 +73,10 @@ class CommercialProjectsPage(QWidget):
             button.deleteLater()
         self.child_buttons.clear()
 
-        parents = self.service.list_for_commercial(self.user_id)
+        if self.workspace_mode == "manager":
+            parents = self.service.list_for_manager()
+        else:
+            parents = self.service.list_for_commercial(self.user_id)
         self.empty_label.hide()
 
         if not parents:
