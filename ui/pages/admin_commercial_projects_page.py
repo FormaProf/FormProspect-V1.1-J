@@ -206,6 +206,9 @@ class AdminCommercialProjectsPage(QWidget):
         self.parent_table.currentCellChanged.connect(
             self._parent_selection_changed
         )
+        self.commercial_table.currentCellChanged.connect(
+            self._commercial_selection_changed
+        )
         self.project_table.currentCellChanged.connect(
             self._project_selection_changed
         )
@@ -258,6 +261,27 @@ class AdminCommercialProjectsPage(QWidget):
         self.landing_status_label.setText("Aucun lien")
         self.landing_url_edit.clear()
 
+    def _selected_commercial_user_id(self):
+        parent = self._selected_parent()
+        commercials = tuple(parent.assigned_commercials) if parent else ()
+        row = self.commercial_table.currentRow()
+        if 0 <= row < len(commercials):
+            return str(getattr(commercials[row], "id", "") or "").strip()
+        return ""
+
+    def _commercial_selection_changed(
+        self,
+        _row,
+        _column,
+        _old_row,
+        _old_column,
+    ):
+        project_row = self.project_table.currentRow()
+        if project_row < 0:
+            self._clear_landing()
+            return
+        self._project_selection_changed(project_row, 0, -1, -1)
+
     def _project_selection_changed(self, row, _column, _old_row, _old_column):
         parent = self._selected_parent()
         projects = tuple(parent.projects) if parent else ()
@@ -266,9 +290,10 @@ class AdminCommercialProjectsPage(QWidget):
             return
 
         project = projects[row]
-        commercial_user_id = str(
-            getattr(project, "assigned_to", "") or ""
-        ).strip()
+        commercial_user_id = (
+            self._selected_commercial_user_id()
+            or str(getattr(project, "assigned_to", "") or "").strip()
+        )
         if not commercial_user_id:
             self._clear_landing()
             return
@@ -324,9 +349,10 @@ class AdminCommercialProjectsPage(QWidget):
             return
 
         project = projects[row]
-        commercial_user_id = str(
-            getattr(project, "assigned_to", "") or ""
-        ).strip()
+        commercial_user_id = (
+            self._selected_commercial_user_id()
+            or str(getattr(project, "assigned_to", "") or "").strip()
+        )
         if not commercial_user_id:
             return
 
@@ -358,9 +384,10 @@ class AdminCommercialProjectsPage(QWidget):
             return
 
         project = projects[row]
-        commercial_user_id = str(
-            getattr(project, "assigned_to", "") or ""
-        ).strip()
+        commercial_user_id = (
+            self._selected_commercial_user_id()
+            or str(getattr(project, "assigned_to", "") or "").strip()
+        )
         if not commercial_user_id:
             return
 

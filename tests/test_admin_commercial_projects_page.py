@@ -403,3 +403,27 @@ def test_admin_page_opens_landing_url(qapp, monkeypatch):
     monkeypatch.setattr(admin_page_module.QDesktopServices, "openUrl", lambda value: calls.append(value.toString()) or True)
     page._on_open_landing_clicked()
     assert calls == [url]
+
+def test_admin_page_uses_selected_commercial_for_landing_when_child_has_no_assignee(
+    qapp,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        SessionState,
+        "has_role",
+        classmethod(lambda cls, *roles: "Administrateur" in roles),
+    )
+
+    snapshot = build_snapshot()
+    snapshot.parents[0].projects[0].assigned_to = ""
+
+    service = LandingAwareAdminService(snapshot)
+    page = AdminCommercialProjectsPage(service=service, auto_refresh=False)
+    page.rafraichir()
+
+    page.commercial_table.selectRow(0)
+    page.project_table.selectRow(0)
+    qapp.processEvents()
+
+    assert service.landing_calls == [("child-1", "user-florian")]
+    assert page.landing_commercial_label.text() == "Florian"
