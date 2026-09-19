@@ -405,6 +405,7 @@ class CloudDashboardDataProvider(DashboardDataProvider):
             "telephone": (
                 "phone",
                 "telephone",
+                "mobile",
             ),
             "email": (
                 "email",

@@ -639,7 +639,7 @@ class CloudProspectDataProvider(ProspectDataProvider):
         ).total
 
     def count_with_phone(self) -> int:
-        return sum(1 for row in self._list(limite=500) if row[4])
+        return sum(1 for row in self._list(limite=500) if row[4] or row[15])
 
     def count_with_email(self) -> int:
         return sum(1 for row in self._list(limite=500) if row[6])
