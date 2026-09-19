@@ -158,8 +158,13 @@ class AdminCommercialProjectsPage(QWidget):
         self.attach_project_button.clicked.connect(self._on_attach_project_clicked)
         self.detach_project_button = QPushButton("Détacher")
         self.detach_project_button.clicked.connect(self._on_detach_project_clicked)
+        self.assign_project_commercial_button = QPushButton("Affecter au commercial")
+        self.assign_project_commercial_button.clicked.connect(
+            self._on_assign_project_commercial_clicked
+        )
         project_actions.addWidget(self.attach_project_button)
         project_actions.addWidget(self.detach_project_button)
+        project_actions.addWidget(self.assign_project_commercial_button)
         project_actions.addStretch(1)
         layout.addLayout(project_actions)
 
@@ -486,6 +491,14 @@ class AdminCommercialProjectsPage(QWidget):
         self.service.attach_project(parent_id, project_id)
         self.rafraichir()
 
+    def _assign_project_to_commercial(self, project_id, commercial_user_id):
+        if not SessionState.has_role("Administrateur"):
+            return
+        self.service.assign_project_to_commercial(
+            project_id,
+            commercial_user_id,
+        )
+        self.rafraichir()
     def _detach_project(self, project_id):
         if not SessionState.has_role("Administrateur"):
             return
@@ -586,6 +599,25 @@ class AdminCommercialProjectsPage(QWidget):
         project_id = dialog.selected_project_id()
         if project_id:
             self._attach_project(parent.id, project_id)
+
+    def _on_assign_project_commercial_clicked(self, *_args):
+        parent = self._selected_parent()
+        if parent is None:
+            return
+
+        project_row = self.project_table.currentRow()
+        projects = tuple(parent.projects)
+        if not 0 <= project_row < len(projects):
+            return
+
+        commercial_user_id = self._selected_commercial_user_id()
+        if not commercial_user_id:
+            return
+
+        self._assign_project_to_commercial(
+            projects[project_row].id,
+            commercial_user_id,
+        )
 
     def _on_detach_project_clicked(self, *_args):
         parent = self._selected_parent()

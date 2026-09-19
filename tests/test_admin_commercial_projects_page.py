@@ -94,6 +94,9 @@ class RecordingAdminService(FakeAdminService):
     def detach_project(self, project_id):
         self.mutations.append(("detach", project_id))
 
+    def assign_project_to_commercial(self, project_id, commercial_user_id):
+        self.mutations.append(("assign_project_commercial", project_id, commercial_user_id))
+
 
 def test_admin_page_mutation_actions_delegate_and_refresh(qapp, monkeypatch):
     monkeypatch.setattr(
@@ -427,3 +430,39 @@ def test_admin_page_uses_selected_commercial_for_landing_when_child_has_no_assig
 
     assert service.landing_calls == [("child-1", "user-florian")]
     assert page.landing_commercial_label.text() == "Florian"
+
+
+def test_admin_page_exposes_assign_project_to_commercial_control(qapp):
+    page = AdminCommercialProjectsPage(
+        service=FakeAdminService(build_snapshot()),
+        auto_refresh=False,
+    )
+
+    assert page.assign_project_commercial_button.text() == 'Affecter au commercial'
+
+
+def test_admin_page_assigns_selected_child_project_to_selected_commercial(qapp, monkeypatch):
+    monkeypatch.setattr(
+        SessionState,
+        "has_role",
+        classmethod(lambda cls, *roles: "Administrateur" in roles),
+    )
+
+    snapshot = build_snapshot()
+    snapshot.parents[0].projects[0].assigned_to = ""
+    service = RecordingAdminService(snapshot)
+    page = AdminCommercialProjectsPage(service=service, auto_refresh=False)
+    page.rafraichir()
+
+    page.commercial_table.selectRow(0)
+    page.project_table.selectRow(0)
+    qapp.processEvents()
+
+    page.assign_project_commercial_button.click()
+    qapp.processEvents()
+
+    assert (
+        "assign_project_commercial",
+        "child-1",
+        "user-florian",
+    ) in service.mutations

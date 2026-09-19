@@ -192,3 +192,9 @@ class CommercialProjectAdminService:
             str(project_id).strip(),
             None,
         )
+
+    def assign_project_to_commercial(self, project_id: str, commercial_user_id: str):
+        return self.api.update_project(
+            str(project_id).strip(),
+            {"assigned_to": str(commercial_user_id).strip()},
+        )

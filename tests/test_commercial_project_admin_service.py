@@ -64,6 +64,9 @@ class FakeAPI:
     def set_project_commercial_parent(self, project_id, parent_id):
         self.calls.append(("attach", project_id, parent_id))
 
+    def update_project(self, project_id, payload):
+        self.calls.append(("update_project", project_id, payload))
+
 
 def test_admin_snapshot_groups_parents_commercials_and_child_projects():
     api = FakeAPI()
@@ -89,6 +92,7 @@ def test_admin_mutations_delegate_to_existing_cloud_api():
     service.remove_commercial("parent-btp", "user-florian")
     service.attach_project("parent-btp", "child-1")
     service.detach_project("child-1")
+    service.assign_project_to_commercial("child-1", "user-florian")
 
     assert ("create", {"name": "BTP", "description": "Offre BTP"}) in api.calls
     assert ("update", "parent-btp", {"name": "BTP Premium", "description": "Nouvelle offre"}) in api.calls
@@ -97,6 +101,11 @@ def test_admin_mutations_delegate_to_existing_cloud_api():
     assert ("unassign", "parent-btp", "user-florian") in api.calls
     assert ("attach", "child-1", "parent-btp") in api.calls
     assert ("attach", "child-1", None) in api.calls
+    assert (
+        "update_project",
+        "child-1",
+        {"assigned_to": "user-florian"},
+    ) in api.calls
 
 
 def test_admin_child_project_keeps_primary_commercial_assignment():
