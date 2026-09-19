@@ -407,7 +407,7 @@ def test_admin_page_opens_landing_url(qapp, monkeypatch):
     page._on_open_landing_clicked()
     assert calls == [url]
 
-def test_admin_page_uses_selected_commercial_for_landing_when_child_has_no_assignee(
+def test_admin_page_does_not_query_landing_until_child_is_assigned(
     qapp,
     monkeypatch,
 ):
@@ -428,8 +428,9 @@ def test_admin_page_uses_selected_commercial_for_landing_when_child_has_no_assig
     page.project_table.selectRow(0)
     qapp.processEvents()
 
-    assert service.landing_calls == [("child-1", "user-florian")]
+    assert service.landing_calls == []
     assert page.landing_commercial_label.text() == "Florian"
+    assert page.landing_status_label.text() == "Projet à affecter au commercial"
 
 
 def test_admin_page_exposes_assign_project_to_commercial_control(qapp):

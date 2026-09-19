@@ -295,9 +295,13 @@ class AdminCommercialProjectsPage(QWidget):
             return
 
         project = projects[row]
+        selected_commercial_user_id = self._selected_commercial_user_id()
+        assigned_commercial_user_id = str(
+            getattr(project, "assigned_to", "") or ""
+        ).strip()
         commercial_user_id = (
-            self._selected_commercial_user_id()
-            or str(getattr(project, "assigned_to", "") or "").strip()
+            selected_commercial_user_id
+            or assigned_commercial_user_id
         )
         if not commercial_user_id:
             self._clear_landing()
@@ -315,6 +319,16 @@ class AdminCommercialProjectsPage(QWidget):
                     break
 
         self.landing_commercial_label.setText(commercial_name)
+
+        if (
+            selected_commercial_user_id
+            and selected_commercial_user_id != assigned_commercial_user_id
+        ):
+            self.landing_status_label.setText(
+                "Projet à affecter au commercial"
+            )
+            self.landing_url_edit.clear()
+            return
 
         getter = getattr(self.service, "get_landing", None)
         if getter is None:
