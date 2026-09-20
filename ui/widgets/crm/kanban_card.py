@@ -31,6 +31,7 @@ class KanbanCard(QFrame):
         priorite = prospect[8] if len(prospect) > 8 and prospect[8] else PRIORITE_DEFAULT
         prochaine_action = prospect[9] if len(prospect) > 9 and prospect[9] else ACTION_DEFAULT
         commercial = prospect[11] if len(prospect) > 11 and prospect[11] else "Non assigné"
+        source = prospect[16] if len(prospect) > 16 and prospect[16] else "Non renseignee"
         score = prospect[12] if len(prospect) > 12 and prospect[12] is not None else 0
         score_grade = prospect[13] if len(prospect) > 13 and prospect[13] else "★☆☆☆☆"
 
@@ -56,6 +57,8 @@ class KanbanCard(QFrame):
         ville_label = self._label_info(f"Ville  •  {ville}")
         tel_label = self._label_info(f"Tél.  •  {telephone}")
         action_label = self._label_info(f"Action  •  {prochaine_action}")
+
+        source_label = self._label_info(f"Source : {source}")
 
         score_label = QLabel(f"{score_grade}  {score}/100")
         score_label.setStyleSheet(
@@ -113,6 +116,7 @@ class KanbanCard(QFrame):
         infos_layout.addWidget(ville_label)
         infos_layout.addWidget(tel_label)
         infos_layout.addWidget(action_label)
+        infos_layout.addWidget(source_label)
 
         layout.addWidget(titre)
         layout.addLayout(infos_layout)
