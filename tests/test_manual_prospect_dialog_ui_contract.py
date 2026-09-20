@@ -56,3 +56,14 @@ def test_manual_creation_refreshes_prospects():
     assert "def ajouter_prospect_manuellement(self):" in PAGE
     assert "force_refresh=True" in PAGE
     assert "is_cloud_mode=self._is_cloud()" in PAGE
+
+
+def test_admin_unassigned_owner_is_explicit_in_payload():
+    from pathlib import Path
+
+    source = Path("ui/dialogs/manual_prospect_dialog.py").read_text(encoding="utf-8")
+    payload_block = source.split("def _payload(self):", 1)[1].split("def _create_prospect", 1)[0]
+
+    assert '"Non affecté"' in source
+    assert "and owner_id" not in payload_block
+    assert 'payload["owner_user_id"] = owner_id' in payload_block

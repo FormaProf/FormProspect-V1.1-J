@@ -234,7 +234,7 @@ class ManualProspectDialog(QDialog):
 
         self.owner_combo.clear()
         self.owner_combo.addItem(
-            "Moi-même (Administrateur)",
+            "Non affecté",
             None,
         )
 
@@ -299,7 +299,6 @@ class ManualProspectDialog(QDialog):
 
         if (
             self.owner_combo.isVisible()
-            and owner_id
         ):
             payload["owner_user_id"] = owner_id
 
