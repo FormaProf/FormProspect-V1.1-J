@@ -25,3 +25,15 @@ def test_cloud_provider_can_explicitly_unassign_owner():
 def test_cloud_does_not_duplicate_owner_change_in_activity_feed():
     assert "not self._is_cloud_mode" in DIALOG
     assert "nouveau_commercial != self.ancien_commercial" in DIALOG
+
+
+def test_admin_owner_save_uses_stable_uuid_not_visible_label():
+    save_block = DIALOG.split("def enregistrer(self):", 1)[1]
+    assert "self.commercial_selector.currentData()" in save_block
+    assert "self.commercial_selector.currentText().strip()" not in save_block
+
+
+def test_unknown_owner_label_is_never_forwarded_as_uuid():
+    assert "mapped = self._owner_id_by_label.get(value)" in PROVIDER
+    assert "uuid.UUID(value)" in PROVIDER
+    assert "return self._owner_id_by_label.get(value, value)" not in PROVIDER

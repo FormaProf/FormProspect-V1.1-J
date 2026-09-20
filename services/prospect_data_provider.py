@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -545,7 +547,15 @@ class CloudProspectDataProvider(ProspectDataProvider):
             return ""
 
         self._load_owner_names()
-        return self._owner_id_by_label.get(value, value)
+
+        mapped = self._owner_id_by_label.get(value)
+        if mapped:
+            return mapped
+
+        try:
+            return str(uuid.UUID(value))
+        except (ValueError, AttributeError):
+            return ""
 
     def _row(self, item: dict, *, detailed: bool = False):
         owner_display_name = self._owner_display_name(

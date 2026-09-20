@@ -1458,7 +1458,7 @@ class ProspectDialog(QDialog):
                 )
 
             nouveau_commercial = (
-                self.commercial_selector.currentText().strip()
+                self.commercial_selector.currentData()
                 if self._can_assign_owner
                 else self.commercial_input.text().strip()
             )
