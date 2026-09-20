@@ -2,7 +2,7 @@ import threading
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from core.constants import *
 from core.paths import resource_path
@@ -14,6 +14,7 @@ from services.commercial_project_admin_service import CommercialProjectAdminServ
 from services.update_service import UpdateError, UpdateService
 from ui.components.notifications import NotificationManager
 from ui.dialogs.about_dialog import AboutDialog
+from ui.dialogs.appearance_dialog import AppearanceDialog
 from ui.dialogs.update_dialog import UpdateDialog
 from ui.pages.account_page import AccountPage
 from ui.pages.admin_account_page import AdminAccountPage
@@ -172,6 +173,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         NotificationManager.configure(self)
 
+        self.account_page.appearance_requested.connect(self.ouvrir_apparence)
+
         self.sidebar.buttons_by_key["dashboard"].clicked.connect(self.ouvrir_dashboard)
         if SessionState.has_role("Commercial", "Manager"):
             self.sidebar.buttons_by_key["commercial_projects"].clicked.connect(
@@ -240,6 +243,10 @@ class MainWindow(QMainWindow):
         action_account = QAction("Mon compte", self)
         action_account.triggered.connect(self.ouvrir_compte)
         menu_compte.addAction(action_account)
+
+        action_appearance = QAction("Apparence", self)
+        action_appearance.triggered.connect(self.ouvrir_apparence)
+        menu_compte.addAction(action_appearance)
         if SessionState.has_role("Administrateur"):
             action_admin_users = QAction("Compte utilisateurs", self)
             action_admin_users.triggered.connect(self.ouvrir_compte_utilisateurs)
@@ -649,6 +656,16 @@ class MainWindow(QMainWindow):
         self.account_page.rafraichir()
         self.mettre_a_jour_barre_statut()
         self.pages.setCurrentWidget(self.account_page)
+
+    def ouvrir_apparence(self):
+        dialog = AppearanceDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self.account_page.refresh_appearance_summary()
+        self.statusBar().showMessage(
+            "Apparence enregistrée. Le thème sélectionné s'applique aux écrans UI 2.0.",
+            5000,
+        )
 
     def _refresh_connected_profile(self):
         self.sidebar.refresh_profile()

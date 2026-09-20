@@ -23,6 +23,17 @@ from services.scoring_service import ScoringService
 from core.database import init_database
 from services.cloud_runtime import CloudRuntime
 from core.session import SessionState
+from core.theme_settings import (
+    THEME_CLASSIC,
+    THEME_UI_LIGHT,
+    THEME_UI_DARK,
+    get_theme_preference,
+)
+from ui.ai_premium_theme import (
+    AIPremiumCard,
+    theme_values,
+    widget_styles,
+)
 
 
 
@@ -526,6 +537,9 @@ class ProspectDialog(QDialog):
             and SessionState.has_role("Administrateur")
         )
 
+        self._theme_preference = get_theme_preference()
+        self._resolved_theme = self._theme_preference
+
         # Les notes et l'historique doivent suivre le contexte explicite de
         # la fiche. Cela permet d'ouvrir une fiche depuis le CRM Cloud global
         # même lorsqu'aucun projet Form@Prospect n'est ouvert.
@@ -545,72 +559,106 @@ class ProspectDialog(QDialog):
         if not self._is_cloud_mode:
             init_database(self.database_path)
 
-        self.setWindowTitle("Fiche prospect")
-        self.resize(980, 860)
-        self.setMinimumSize(820, 640)
-        self.setStyleSheet("background:#F5F8FC;")
+        if self._resolved_theme == THEME_CLASSIC:
+            self.setWindowTitle("Fiche prospect")
+            self.resize(980, 860)
+            self.setMinimumSize(820, 640)
+        else:
+            self.setWindowTitle("Form@Prospect — AI Prospect Command Center")
+            self.resize(1120, 900)
+            self.setMinimumSize(920, 700)
+        self.setStyleSheet(
+            f"background:{theme_values(self._resolved_theme)['bg']};"
+        )
 
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
 
         # -------------------------
-        # Header premium fixe
+        # Header AI Premium fixe
         # -------------------------
         header = QFrame()
+        self.header = header
         header.setObjectName("ProspectHeader")
         header.setStyleSheet("""
             QFrame#ProspectHeader {
-                background: qlineargradient(
+                background:qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #FFFFFF,
-                    stop:0.72 #F7FBFF,
-                    stop:1 #EAF4FF
+                    stop:0 #071321,
+                    stop:0.52 #0B2137,
+                    stop:0.82 #102D4B,
+                    stop:1 #151D43
                 );
-                border: none;
-                border-bottom: 1px solid #E4EBF4;
+                border:none;
+                border-bottom:1px solid #214D70;
             }
         """)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(28, 22, 28, 20)
-        header_layout.setSpacing(16)
+        header_layout.setContentsMargins(30, 24, 30, 22)
+        header_layout.setSpacing(18)
+
+        accent = QFrame()
+        self.header_accent = accent
+        accent.setFixedWidth(4)
+        accent.setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "stop:0 #65D8FF, stop:0.55 #338CE4, stop:1 #6C63FF);"
+            "border:none; border-radius:2px;"
+        )
+        header_layout.addWidget(accent)
 
         header_texts = QVBoxLayout()
-        header_texts.setSpacing(3)
+        header_texts.setSpacing(4)
 
-        eyebrow = QLabel("CRM  •  FICHE PROSPECT")
+        eyebrow = QLabel("FORM@PROSPECT  •  AI SALES COMMAND CENTER")
+        self.header_eyebrow = eyebrow
         eyebrow.setStyleSheet(
-            "font-size:10px; font-weight:900; letter-spacing:1.1px; "
-            "color:#338CE4; background:transparent; border:none;"
+            "font-size:10px; font-weight:900; letter-spacing:1.35px; "
+            "color:#65D8FF; background:transparent; border:none;"
         )
 
         self.titre = QLabel("Fiche prospect")
         self.titre.setStyleSheet(
-            "font-size:28px; font-weight:900; color:#0B1220; "
+            "font-size:30px; font-weight:900; color:#F7FBFF; "
             "background:transparent; border:none;"
         )
 
-        self.header_subtitle = QLabel("Coordonnées, suivi commercial, scoring et historique.")
+        self.header_subtitle = QLabel(
+            "Données, actions commerciales, automatisation et historique."
+        )
         self.header_subtitle.setStyleSheet(
-            "font-size:12px; color:#6B7A90; background:transparent; border:none;"
+            "font-size:12px; color:#8EA7C1; background:transparent; border:none;"
         )
 
         header_texts.addWidget(eyebrow)
         header_texts.addWidget(self.titre)
         header_texts.addWidget(self.header_subtitle)
 
-        self.header_pipeline_badge = QLabel("PROSPECT")
-        self.header_pipeline_badge.setAlignment(Qt.AlignCenter)
-        self.header_pipeline_badge.setMinimumWidth(110)
-        self.header_pipeline_badge.setFixedHeight(32)
-        self.header_pipeline_badge.setStyleSheet(
-            "font-size:10px; font-weight:900; color:#075985; "
-            "background:#EFF8FF; border:1px solid #BAE6FD; border-radius:11px; "
-            "padding:0 12px;"
+        header_status = QVBoxLayout()
+        header_status.setSpacing(8)
+
+        mode_text = "CLOUD CRM" if self._is_cloud_mode else "LOCAL CRM"
+        self.header_mode_chip = QLabel(f"●  {mode_text}")
+        self.header_mode_chip.setAlignment(Qt.AlignCenter)
+        self.header_mode_chip.setFixedHeight(28)
+        self.header_mode_chip.setStyleSheet(
+            "font-size:9px; font-weight:900; letter-spacing:0.8px; "
+            "color:#8FE7FF; background:#0B2742; "
+            "border:1px solid #255B84; border-radius:10px; padding:0 11px;"
         )
 
+        self.header_pipeline_badge = QLabel("PROSPECT")
+        self.header_pipeline_badge.setAlignment(Qt.AlignCenter)
+        self.header_pipeline_badge.setMinimumWidth(120)
+        self.header_pipeline_badge.setFixedHeight(34)
+
+        header_status.addWidget(self.header_mode_chip)
+        header_status.addWidget(self.header_pipeline_badge)
+        header_status.addStretch()
+
         header_layout.addLayout(header_texts, 1)
-        header_layout.addWidget(self.header_pipeline_badge, 0, Qt.AlignTop)
+        header_layout.addLayout(header_status)
 
         # -------------------------
         # Scroll area
@@ -622,33 +670,38 @@ class ProspectDialog(QDialog):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setStyleSheet("""
             QScrollArea {
-                background:#F5F8FC;
+                background:#06111F;
                 border:none;
             }
             QScrollBar:vertical {
-                background:transparent;
-                width:10px;
-                margin:4px 2px 4px 2px;
+                background:#06111F;
+                width:11px;
+                margin:5px 2px 5px 2px;
             }
             QScrollBar::handle:vertical {
-                background:#CBD5E1;
-                min-height:40px;
+                background:#173A58;
+                min-height:42px;
                 border-radius:5px;
             }
             QScrollBar::handle:vertical:hover {
-                background:#94A3B8;
+                background:#338CE4;
             }
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {
                 height:0;
             }
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background:transparent;
+            }
         """)
 
         content = QWidget()
-        content.setStyleSheet("background:#F5F8FC;")
+        self.content = content
+        content.setStyleSheet("background:#06111F;")
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(28, 24, 28, 28)
-        layout.setSpacing(18)
+        layout.setContentsMargins(30, 26, 30, 30)
+        layout.setSpacing(20)
 
         # -------------------------
         # Widgets / champs
@@ -809,7 +862,8 @@ class ProspectDialog(QDialog):
         )
 
         self.notes_liste = QListWidget()
-        self.notes_liste.setFixedHeight(138)
+        self.notes_liste.setFixedHeight(150)
+        self.notes_liste.setSpacing(4)
         self.notes_liste.setToolTip(
             "Historique des notes saisies manuellement sur ce prospect."
         )
@@ -818,6 +872,7 @@ class ProspectDialog(QDialog):
         self.note_input.setFixedHeight(82)
 
         bouton_ajouter_note = QPushButton("Ajouter la note")
+        self.bouton_ajouter_note = bouton_ajouter_note
         bouton_ajouter_note.setFixedHeight(40)
         bouton_ajouter_note.clicked.connect(self.ajouter_note)
         bouton_ajouter_note.setStyleSheet(self._secondary_action_style())
@@ -838,7 +893,8 @@ class ProspectDialog(QDialog):
             "Retrouvez les dernières modifications et interactions enregistrées."
         )
         self.activities_liste = QListWidget()
-        self.activities_liste.setFixedHeight(170)
+        self.activities_liste.setFixedHeight(190)
+        self.activities_liste.setSpacing(4)
         self.activities_liste.setToolTip(
             "Historique chronologique des actions et modifications du prospect."
         )
@@ -855,28 +911,42 @@ class ProspectDialog(QDialog):
         # Footer fixe
         # -------------------------
         footer = QFrame()
+        self.footer = footer
         footer.setObjectName("ProspectFooter")
         footer.setStyleSheet("""
             QFrame#ProspectFooter {
-                background:#FFFFFF;
+                background:qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #071522,
+                    stop:1 #0A1D30
+                );
                 border:none;
-                border-top:1px solid #E4EBF4;
+                border-top:1px solid #1C405F;
             }
         """)
         footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(24, 14, 24, 14)
+        footer_layout.setContentsMargins(26, 14, 26, 14)
         footer_layout.setSpacing(10)
 
+        footer_hint = QLabel("AI PREMIUM EXPERIENCE  •  Form@Prospect")
+        self.footer_hint = footer_hint
+        footer_hint.setStyleSheet(
+            "font-size:9px; font-weight:800; letter-spacing:1px; "
+            "color:#52718D; background:transparent; border:none;"
+        )
+
         cancel_button = QPushButton("Fermer")
-        cancel_button.setFixedHeight(42)
+        self.cancel_button = cancel_button
+        cancel_button.setFixedHeight(44)
         cancel_button.clicked.connect(self.reject)
         cancel_button.setStyleSheet(self._secondary_action_style())
 
         self.bouton_enregistrer = QPushButton("Enregistrer les modifications")
-        self.bouton_enregistrer.setFixedHeight(42)
+        self.bouton_enregistrer.setFixedHeight(44)
         self.bouton_enregistrer.clicked.connect(self.enregistrer)
         self.bouton_enregistrer.setStyleSheet(self._primary_action_style())
 
+        footer_layout.addWidget(footer_hint)
         footer_layout.addStretch()
         footer_layout.addWidget(cancel_button)
         footer_layout.addWidget(self.bouton_enregistrer)
@@ -885,37 +955,49 @@ class ProspectDialog(QDialog):
         page_layout.addWidget(self.scroll_area, 1)
         page_layout.addWidget(footer)
 
+        self._apply_theme()
+
         self.charger_prospect()
         self.charger_notes()
         self.charger_activities()
 
     @staticmethod
     def _section_card(title, subtitle):
-        card = QFrame()
-        card.setObjectName("ProspectSection")
-        card.setStyleSheet("""
-            QFrame#ProspectSection {
-                background:#FFFFFF;
-                border:1px solid #E4EBF4;
-                border-radius:18px;
-            }
-        """)
+        variant = "ai" if "SCORING" in str(title).upper() else "default"
+        card = AIPremiumCard(variant=variant)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 18, 20, 20)
-        card_layout.setSpacing(12)
+        card_layout.setContentsMargins(22, 20, 22, 22)
+        card_layout.setSpacing(13)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(9)
+
+        signal = QLabel("●")
+        signal.setObjectName("ProspectCardSignal")
+        signal.setFixedWidth(12)
+        signal.setStyleSheet(
+            "font-size:12px; color:#65D8FF; background:transparent; border:none;"
+        )
 
         eyebrow = QLabel(title)
+        eyebrow.setObjectName("ProspectCardTitle")
         eyebrow.setStyleSheet(
-            "font-size:10px; font-weight:900; letter-spacing:1px; "
-            "color:#338CE4; background:transparent; border:none;"
-        )
-        description = QLabel(subtitle)
-        description.setWordWrap(True)
-        description.setStyleSheet(
-            "font-size:11px; color:#7A899C; background:transparent; border:none;"
+            "font-size:10px; font-weight:900; letter-spacing:1.15px; "
+            "color:#65D8FF; background:transparent; border:none;"
         )
 
-        card_layout.addWidget(eyebrow)
+        title_row.addWidget(signal)
+        title_row.addWidget(eyebrow)
+        title_row.addStretch()
+
+        description = QLabel(subtitle)
+        description.setObjectName("ProspectCardDescription")
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            "font-size:11px; color:#7892AE; background:transparent; border:none;"
+        )
+
+        card_layout.addLayout(title_row)
         card_layout.addWidget(description)
         return card
 
@@ -925,12 +1007,13 @@ class ProspectDialog(QDialog):
         block.setStyleSheet("background:transparent;")
         block_layout = QVBoxLayout(block)
         block_layout.setContentsMargins(0, 0, 0, 0)
-        block_layout.setSpacing(6)
+        block_layout.setSpacing(7)
 
         label = QLabel(label_text)
+        label.setObjectName("ProspectFieldLabel")
         label.setStyleSheet(
-            "font-size:11px; font-weight:800; color:#53657C; "
-            "background:transparent; border:none;"
+            "font-size:10px; font-weight:850; letter-spacing:0.35px; "
+            "color:#8EA7C1; background:transparent; border:none;"
         )
 
         block_layout.addWidget(label)
@@ -938,6 +1021,7 @@ class ProspectDialog(QDialog):
         return block
 
     def _apply_field_styles(self):
+        styles = widget_styles(self._resolved_theme)
         editable = [
             self.telephone_input,
             self.mobile_input,
@@ -948,7 +1032,6 @@ class ProspectDialog(QDialog):
             self.instagram_input,
             self.twitter_input,
             self.youtube_input,
-            self.date_prochaine_action_input,
             self.commercial_input,
         ]
         readonly = [
@@ -964,167 +1047,315 @@ class ProspectDialog(QDialog):
             self.commercial_selector,
         ]
 
-        normal_style = """
-            QLineEdit, QTextEdit {
-                background:#FFFFFF;
-                color:#172033;
-                border:1px solid #DCE5EF;
-                border-radius:10px;
-                padding:8px 10px;
-                font-size:12px;
-            }
-            QLineEdit:focus, QTextEdit:focus {
-                border:2px solid #338CE4;
-                background:#FFFFFF;
-            }
-        """
-
-        readonly_style = """
-            QLineEdit {
-                background:#F8FAFC;
-                color:#475569;
-                border:1px solid #E2E8F0;
-                border-radius:10px;
-                padding:8px 10px;
-                font-size:12px;
-                font-weight:750;
-            }
-        """
-
-        combo_style = """
-            QComboBox {
-                background:#FFFFFF;
-                color:#172033;
-                border:1px solid #DCE5EF;
-                border-radius:10px;
-                min-height:38px;
-                padding:0 10px;
-                font-size:12px;
-                font-weight:750;
-            }
-            QComboBox:focus {
-                border:2px solid #338CE4;
-            }
-            QComboBox::drop-down {
-                border:none;
-                width:28px;
-            }
-        """
-
         for widget in editable:
-            widget.setMinimumHeight(40)
-            widget.setStyleSheet(normal_style)
+            widget.setMinimumHeight(42)
+            widget.setStyleSheet(styles["editable"])
 
         for widget in readonly:
-            widget.setMinimumHeight(40)
-            widget.setStyleSheet(readonly_style)
+            widget.setMinimumHeight(42)
+            widget.setStyleSheet(styles["readonly"])
 
         for widget in combos:
-            widget.setMinimumHeight(40)
-            widget.setStyleSheet(combo_style)
+            widget.setMinimumHeight(42)
+            widget.setStyleSheet(styles["combo"])
 
-        self.social_other_urls_input.setStyleSheet(normal_style)
+        self.social_other_urls_input.setStyleSheet(styles["editable"])
 
-        self.score_input.setMinimumHeight(46)
-        self.score_input.setStyleSheet("""
-            QLineEdit {
-                background:#F1F8FF;
-                color:#075985;
-                border:1px solid #CFE7FB;
-                border-radius:11px;
-                padding:8px 12px;
-                font-size:13px;
-                font-weight:900;
-            }
+        picker = self.date_prochaine_action_input
+        picker.display.setMinimumHeight(42)
+        picker.display.setStyleSheet(styles["date_display"])
+        picker.time_display.setMinimumHeight(42)
+        picker.time_display.setStyleSheet(styles["date_display"])
+        picker.time_button.setMinimumHeight(42)
+        picker.time_button.setStyleSheet(styles["date_button"])
+        picker.button.setMinimumHeight(42)
+        picker.button.setStyleSheet(styles["date_button"])
+
+        self.score_input.setMinimumHeight(50)
+        self.score_input.setStyleSheet(styles["score"])
+        self.score_details_input.setStyleSheet(styles["score_details"])
+
+        self.notes_liste.setStyleSheet(styles["list"])
+        self.note_input.setStyleSheet(styles["editable"])
+        self.activities_liste.setStyleSheet(styles["list"])
+
+    def _primary_action_style(self):
+        return widget_styles(self._resolved_theme)["primary"]
+
+    def _secondary_action_style(self):
+        return widget_styles(self._resolved_theme)["secondary"]
+
+    def _apply_theme(self):
+        self._theme_preference = get_theme_preference()
+        self._resolved_theme = self._theme_preference
+        p = theme_values(self._resolved_theme)
+        styles = widget_styles(self._resolved_theme)
+        classic = self._resolved_theme == THEME_CLASSIC
+        dark = self._resolved_theme == THEME_UI_DARK
+
+        self.setStyleSheet(f"background:{p['bg']};")
+        self.content.setStyleSheet(f"background:{p['bg']};")
+
+        if classic:
+            self.setWindowTitle("Fiche prospect")
+            self.header.layout().setContentsMargins(28, 22, 28, 20)
+            self.header.layout().setSpacing(16)
+            self.content.layout().setContentsMargins(28, 24, 28, 28)
+            self.content.layout().setSpacing(18)
+            self.footer.layout().setContentsMargins(24, 14, 24, 14)
+            self.header_accent.setVisible(False)
+            self.header_eyebrow.setText("CRM  •  FICHE PROSPECT")
+            self.header_eyebrow.setStyleSheet(
+                "font-size:10px; font-weight:900; letter-spacing:1.1px; "
+                "color:#338CE4; background:transparent; border:none;"
+            )
+            self.header_mode_chip.setVisible(False)
+            self.footer_hint.setVisible(False)
+
+            self.header.setStyleSheet("""
+                QFrame#ProspectHeader {
+                    background:qlineargradient(
+                        x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #FFFFFF,
+                        stop:0.72 #F7FBFF,
+                        stop:1 #EAF4FF
+                    );
+                    border:none;
+                    border-bottom:1px solid #E4EBF4;
+                }
+            """)
+            self.footer.setStyleSheet("""
+                QFrame#ProspectFooter {
+                    background:#FFFFFF;
+                    border:none;
+                    border-top:1px solid #E4EBF4;
+                }
+            """)
+            self.titre.setStyleSheet(
+                "font-size:28px; font-weight:900; color:#0B1220; "
+                "background:transparent; border:none;"
+            )
+            self.header_subtitle.setStyleSheet(
+                "font-size:12px; color:#6B7A90; "
+                "background:transparent; border:none;"
+            )
+        else:
+            self.setWindowTitle("Form@Prospect — AI Prospect Command Center")
+            self.header.layout().setContentsMargins(30, 24, 30, 22)
+            self.header.layout().setSpacing(18)
+            self.content.layout().setContentsMargins(30, 26, 30, 30)
+            self.content.layout().setSpacing(20)
+            self.footer.layout().setContentsMargins(26, 14, 26, 14)
+            self.header_accent.setVisible(True)
+            self.header_eyebrow.setText(
+                "FORM@PROSPECT  •  AI SALES COMMAND CENTER"
+            )
+            self.header_eyebrow.setStyleSheet(
+                f"font-size:10px; font-weight:900; letter-spacing:1.35px; "
+                f"color:{p['cyan']}; background:transparent; border:none;"
+            )
+            self.header_mode_chip.setVisible(True)
+            self.footer_hint.setVisible(True)
+
+            if dark:
+                header_start, header_mid, header_end = (
+                    "#071321", "#0B2137", "#151D43"
+                )
+                footer_start, footer_end = "#071522", "#0A1D30"
+            else:
+                header_start, header_mid, header_end = (
+                    "#FFFFFF", "#F5FAFF", "#E8F4FF"
+                )
+                footer_start, footer_end = "#FFFFFF", "#F3F8FD"
+
+            self.header.setStyleSheet(f"""
+                QFrame#ProspectHeader {{
+                    background:qlineargradient(
+                        x1:0, y1:0, x2:1, y2:1,
+                        stop:0 {header_start},
+                        stop:0.52 {header_mid},
+                        stop:1 {header_end}
+                    );
+                    border:none;
+                    border-bottom:1px solid {p['border']};
+                }}
+            """)
+            self.footer.setStyleSheet(f"""
+                QFrame#ProspectFooter {{
+                    background:qlineargradient(
+                        x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {footer_start},
+                        stop:1 {footer_end}
+                    );
+                    border:none;
+                    border-top:1px solid {p['border']};
+                }}
+            """)
+            self.titre.setStyleSheet(
+                f"font-size:30px; font-weight:900; color:{p['text']}; "
+                "background:transparent; border:none;"
+            )
+            self.header_subtitle.setStyleSheet(
+                f"font-size:12px; color:{p['muted']}; "
+                "background:transparent; border:none;"
+            )
+            self.header_mode_chip.setStyleSheet(
+                f"font-size:9px; font-weight:900; letter-spacing:0.8px; "
+                f"color:{p['cyan']}; background:{p['surface_3']}; "
+                f"border:1px solid {p['border']}; border-radius:10px; "
+                "padding:0 11px;"
+            )
+            self.footer_hint.setStyleSheet(
+                "font-size:9px; font-weight:800; letter-spacing:1px; "
+                f"color:{'#52718D' if dark else '#7189A2'}; "
+                "background:transparent; border:none;"
+            )
+
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background:{p['bg']};
+                border:none;
+            }}
+            QScrollBar:vertical {{
+                background:{p['bg']};
+                width:{10 if classic else 11}px;
+                margin:4px 2px 4px 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background:{'#CBD5E1' if classic else p['border']};
+                min-height:40px;
+                border-radius:5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background:{'#94A3B8' if classic else '#338CE4'};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height:0;
+            }}
         """)
 
-        self.score_details_input.setStyleSheet("""
-            QTextEdit {
-                background:#F8FAFC;
-                color:#53657C;
-                border:1px solid #E2E8F0;
-                border-radius:11px;
-                padding:9px 10px;
-                font-size:11px;
-            }
-        """)
+        for card in self.findChildren(AIPremiumCard):
+            card.set_theme_mode(self._resolved_theme)
+            if card.layout() is not None:
+                if classic:
+                    card.layout().setContentsMargins(20, 18, 20, 20)
+                    card.layout().setSpacing(12)
+                else:
+                    card.layout().setContentsMargins(22, 20, 22, 22)
+                    card.layout().setSpacing(13)
 
-        list_style = """
-            QListWidget {
-                background:#FBFDFF;
-                color:#334155;
-                border:1px solid #E2E8F0;
-                border-radius:12px;
-                padding:7px;
-                font-size:11px;
-                outline:0;
-            }
-            QListWidget::item {
-                padding:9px 10px;
-                margin:2px 0;
-                border:none;
-                border-bottom:1px solid #EEF2F6;
-            }
-            QListWidget::item:selected {
-                background:#EAF4FF;
-                color:#0B1220;
-                border-radius:8px;
-            }
-        """
+            signal = card.findChild(QLabel, "ProspectCardSignal")
+            title = card.findChild(QLabel, "ProspectCardTitle")
+            description = card.findChild(QLabel, "ProspectCardDescription")
 
-        self.notes_liste.setStyleSheet(list_style)
-        self.note_input.setStyleSheet(normal_style)
-        self.activities_liste.setStyleSheet(list_style)
+            if signal is not None:
+                signal.setVisible(not classic)
+                signal.setStyleSheet(
+                    f"font-size:12px; color:{p['cyan']}; "
+                    "background:transparent; border:none;"
+                )
+            if title is not None:
+                title.setStyleSheet(
+                    "font-size:10px; font-weight:900; letter-spacing:1px; "
+                    f"color:{'#338CE4' if classic else p['cyan']}; "
+                    "background:transparent; border:none;"
+                )
+            if description is not None:
+                description.setStyleSheet(
+                    "font-size:11px; "
+                    f"color:{'#7A899C' if classic else p['muted']}; "
+                    "background:transparent; border:none;"
+                )
 
-    @staticmethod
-    def _primary_action_style():
-        return """
-            QPushButton {
-                background:#338CE4;
-                color:#FFFFFF;
-                border:none;
-                border-radius:10px;
-                padding:0 18px;
-                font-size:12px;
-                font-weight:900;
-            }
-            QPushButton:hover { background:#247BD0; }
-            QPushButton:pressed { background:#1D66B2; }
-        """
+        for label in self.findChildren(QLabel, "ProspectFieldLabel"):
+            parent = label.parentWidget()
+            if parent is not None and parent.layout() is not None:
+                parent.layout().setSpacing(6 if classic else 7)
+            label.setStyleSheet(
+                "font-size:11px; font-weight:800; "
+                f"color:{'#53657C' if classic else p['muted']}; "
+                "background:transparent; border:none;"
+            )
 
-    @staticmethod
-    def _secondary_action_style():
-        return """
-            QPushButton {
-                background:#FFFFFF;
-                color:#334155;
-                border:1px solid #DCE5EF;
-                border-radius:10px;
-                padding:0 16px;
-                font-size:12px;
-                font-weight:850;
-            }
-            QPushButton:hover {
-                background:#F8FBFF;
-                color:#338CE4;
-                border-color:#AFCFF0;
-            }
-        """
+        self._apply_field_styles()
+        self.cancel_button.setStyleSheet(styles["secondary"])
+        self.bouton_ajouter_note.setStyleSheet(styles["secondary"])
+        self.bouton_enregistrer.setStyleSheet(styles["primary"])
+        self._refresh_header_badge(self.pipeline_input.currentText())
 
     def _refresh_header_badge(self, pipeline_text):
-        labels = {
-            "🟢 Nouveau": ("NOUVEAU", "#ECFDF3", "#166534", "#BBF7D0"),
-            "🟡 Qualification": ("QUALIFICATION", "#FFFBEB", "#854D0E", "#FDE68A"),
-            "🔵 RDV programmé": ("RDV PROGRAMMÉ", "#EFF8FF", "#075985", "#BAE6FD"),
-            "🟣 Proposition envoyée": ("PROPOSITION", "#FAF5FF", "#6B21A8", "#E9D5FF"),
-            "🟠 Négociation": ("NÉGOCIATION", "#FFF7ED", "#9A3412", "#FED7AA"),
-            "🟢 Client": ("CLIENT", "#ECFDF3", "#166534", "#86EFAC"),
-            "🔴 Perdu": ("PERDU", "#FEF2F2", "#991B1B", "#FECACA"),
-        }
-        label, bg, fg, border = labels.get(
-            pipeline_text,
-            ("PROSPECT", "#EFF8FF", "#075985", "#BAE6FD")
-        )
+        text = str(pipeline_text or "")
+        lowered = text.lower()
+        classic = self._resolved_theme == THEME_CLASSIC
+        dark = self._resolved_theme == THEME_UI_DARK
+
+        if classic:
+            labels = {
+                "nouveau": ("NOUVEAU", "#ECFDF3", "#166534", "#BBF7D0"),
+                "qualification": ("QUALIFICATION", "#FFFBEB", "#854D0E", "#FDE68A"),
+                "rdv": ("RDV PROGRAMMÉ", "#EFF8FF", "#075985", "#BAE6FD"),
+                "proposition": ("PROPOSITION", "#FAF5FF", "#6B21A8", "#E9D5FF"),
+                "négociation": ("NÉGOCIATION", "#FFF7ED", "#9A3412", "#FED7AA"),
+                "negociation": ("NÉGOCIATION", "#FFF7ED", "#9A3412", "#FED7AA"),
+                "client": ("CLIENT", "#ECFDF3", "#166534", "#86EFAC"),
+                "perdu": ("PERDU", "#FEF2F2", "#991B1B", "#FECACA"),
+            }
+            values = ("PROSPECT", "#EFF8FF", "#075985", "#BAE6FD")
+            for token, candidate in labels.items():
+                if token in lowered:
+                    values = candidate
+                    break
+        elif "qualification" in lowered:
+            values = (
+                ("QUALIFICATION", "#2A2412", "#FFD27A", "#735921")
+                if dark else
+                ("QUALIFICATION", "#FFF7E4", "#8A5700", "#E8C982")
+            )
+        elif "rdv" in lowered:
+            values = (
+                ("RDV PROGRAMMÉ", "#0C2C45", "#7FDBFF", "#276991")
+                if dark else
+                ("RDV PROGRAMMÉ", "#EAF7FF", "#09608F", "#A8D8F2")
+            )
+        elif "proposition" in lowered:
+            values = (
+                ("PROPOSITION", "#241B42", "#C8A8FF", "#5B4288")
+                if dark else
+                ("PROPOSITION", "#F4EEFF", "#6742A1", "#CDBAEC")
+            )
+        elif "négociation" in lowered or "negociation" in lowered:
+            values = (
+                ("NÉGOCIATION", "#382313", "#FFB77A", "#865127")
+                if dark else
+                ("NÉGOCIATION", "#FFF1E5", "#9A4F0C", "#E9BF98")
+            )
+        elif "client" in lowered:
+            values = (
+                ("CLIENT", "#0E3027", "#73E8B4", "#28765B")
+                if dark else
+                ("CLIENT", "#E9FAF4", "#137450", "#A7DEC9")
+            )
+        elif "perdu" in lowered:
+            values = (
+                ("PERDU", "#35171F", "#FF91A2", "#7E3341")
+                if dark else
+                ("PERDU", "#FFF0F3", "#A62D47", "#EDB7C2")
+            )
+        elif "nouveau" in lowered:
+            values = (
+                ("NOUVEAU", "#0E2A24", "#70E2B1", "#276B56")
+                if dark else
+                ("NOUVEAU", "#EAF9F3", "#147353", "#A9DDCB")
+            )
+        else:
+            values = (
+                ("PROSPECT", "#0B2742", "#8FE7FF", "#2A668F")
+                if dark else
+                ("PROSPECT", "#EAF6FF", "#0A659D", "#A7D6F5")
+            )
+
+        label, bg, fg, border = values
         self.header_pipeline_badge.setText(label)
         self.header_pipeline_badge.setStyleSheet(
             f"font-size:10px; font-weight:900; color:{fg}; "
