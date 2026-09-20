@@ -22,6 +22,7 @@ from services.activity_service import ActivityService
 from services.scoring_service import ScoringService
 from core.database import init_database
 from services.cloud_runtime import CloudRuntime
+from core.session import SessionState
 
 
 
@@ -520,6 +521,11 @@ class ProspectDialog(QDialog):
         else:
             self._is_cloud_mode = bool(is_cloud_mode)
 
+        self._can_assign_owner = (
+            self._is_cloud_mode
+            and SessionState.has_role("Administrateur")
+        )
+
         # Les notes et l'historique doivent suivre le contexte explicite de
         # la fiche. Cela permet d'ouvrir une fiche depuis le CRM Cloud global
         # même lorsqu'aucun projet Form@Prospect n'est ouvert.
@@ -685,6 +691,27 @@ class ProspectDialog(QDialog):
 
         self.commercial_input = QLineEdit()
         self.commercial_input.setPlaceholderText("Nom du commercial assigné")
+        self.commercial_selector = QComboBox()
+        self.commercial_selector.addItem("Non affecté", None)
+        if self._can_assign_owner and CloudRuntime.is_active():
+            try:
+                for candidate in CloudRuntime.api().list_users(active_only=True):
+                    if getattr(candidate, "is_commercial", False):
+                        self.commercial_selector.addItem(
+                            str(candidate.display_name),
+                            str(candidate.id),
+                        )
+            except Exception:
+                pass
+        self.commercial_selector.setVisible(self._can_assign_owner)
+        self.commercial_input.setVisible(not self._can_assign_owner)
+        if self._is_cloud_mode and not self._can_assign_owner:
+            self.commercial_input.setReadOnly(True)
+        self.commercial_field = (
+            self.commercial_selector
+            if self._can_assign_owner
+            else self.commercial_input
+        )
 
         self.score_input = QLineEdit()
         self.score_input.setReadOnly(True)
@@ -758,7 +785,7 @@ class ProspectDialog(QDialog):
         sales_grid.addWidget(self._field_block("Priorité", self.priorite_input), 0, 1)
         sales_grid.addWidget(self._field_block("Prochaine action", self.prochaine_action_input), 1, 0)
         sales_grid.addWidget(self._field_block("Date et heure prochaine action", self.date_prochaine_action_input), 1, 1)
-        sales_grid.addWidget(self._field_block("Commercial assigné", self.commercial_input), 2, 0, 1, 2)
+        sales_grid.addWidget(self._field_block("Commercial assigné", self.commercial_field), 2, 0, 1, 2)
         sales_card.layout().addLayout(sales_grid)
         layout.addWidget(sales_card)
 
@@ -934,6 +961,7 @@ class ProspectDialog(QDialog):
             self.pipeline_input,
             self.priorite_input,
             self.prochaine_action_input,
+            self.commercial_selector,
         ]
 
         normal_style = """
@@ -1285,7 +1313,18 @@ class ProspectDialog(QDialog):
             self.date_prochaine_action_input.clear_date()
             self.date_prochaine_action_input.set_time(QTime(9, 0))
 
-        self.commercial_input.setText(commercial_final)
+        if self._can_assign_owner:
+            normalized_owner = commercial_final.strip()
+            if not normalized_owner or normalized_owner in {"Non assigné", "Non affecté"}:
+                self.commercial_selector.setCurrentIndex(0)
+            else:
+                owner_index = self.commercial_selector.findText(normalized_owner)
+                if owner_index < 0:
+                    self.commercial_selector.addItem(normalized_owner, normalized_owner)
+                    owner_index = self.commercial_selector.count() - 1
+                self.commercial_selector.setCurrentIndex(owner_index)
+        else:
+            self.commercial_input.setText(commercial_final)
         self.score_input.setText(f"{score_grade or '★☆☆☆☆'}  —  {int(score_prospect or 0)}/100  —  {score_label or ''}")
         try:
             import json
@@ -1293,6 +1332,40 @@ class ProspectDialog(QDialog):
         except Exception:
             details = []
         self.score_details_input.setPlainText("\n".join(details) if details else "Score non calculé.")
+
+    @staticmethod
+    def _assignment_history_line(event):
+        old_owner = str(event.get("old_owner_name") or "Non affecté").strip()
+        new_owner = str(event.get("new_owner_name") or "Non affecté").strip()
+        source = (
+            "Landing Page"
+            if str(event.get("source") or "").strip() == "landing"
+            else "Réaffectation manuelle"
+        )
+
+        raw_date = str(event.get("occurred_at") or "").strip()
+        date_text = raw_date.replace("T", " ")[:16]
+        if len(date_text) >= 10 and date_text[4:5] == "-" and date_text[7:8] == "-":
+            date_text = (
+                f"{date_text[8:10]}/{date_text[5:7]}/{date_text[0:4]}"
+                f"{date_text[10:]}"
+            )
+
+        details = [f"{old_owner} → {new_owner}", source]
+
+        old_project = str(event.get("old_project_name") or "").strip()
+        new_project = str(event.get("new_project_name") or "").strip()
+        if old_project and new_project and old_project != new_project:
+            details.append(f"Projet : {old_project} → {new_project}")
+        elif new_project:
+            details.append(f"Projet : {new_project}")
+
+        actor = str(event.get("actor_name") or "").strip()
+        if actor:
+            details.append(f"Effectué par : {actor}")
+
+        prefix = f"{date_text} — " if date_text else ""
+        return f"{prefix}AFFECTATION — " + " • ".join(details)
 
     def charger_notes(self):
         self.notes_liste.clear()
@@ -1309,10 +1382,26 @@ class ProspectDialog(QDialog):
     def charger_activities(self):
         self.activities_liste.clear()
         activities = self.activity_service.get_activities(self.database_path, self.prospect_id)
+        assignment_history = []
 
-        if not activities:
+        if self._is_cloud_mode and CloudRuntime.is_active():
+            try:
+                assignment_history = (
+                    CloudRuntime.api().list_prospect_assignment_history(
+                        str(self.prospect_id)
+                    )
+                )
+            except Exception:
+                assignment_history = []
+
+        if not activities and not assignment_history:
             self.activities_liste.addItem("Aucune action enregistrée.")
             return
+
+        for event in assignment_history:
+            self.activities_liste.addItem(
+                self._assignment_history_line(event)
+            )
 
         for activity in activities:
             activity_id, date_creation, type_action, description = activity
@@ -1368,7 +1457,11 @@ class ProspectDialog(QDialog):
                     f"{selected_time.toString('HH:mm')}"
                 )
 
-            nouveau_commercial = self.commercial_input.text().strip()
+            nouveau_commercial = (
+                self.commercial_selector.currentText().strip()
+                if self._can_assign_owner
+                else self.commercial_input.text().strip()
+            )
 
             is_cloud = self._is_cloud_mode
             self.client_conversion_requested = (
@@ -1447,7 +1540,10 @@ class ProspectDialog(QDialog):
                     f"Date de prochaine action modifiée : {ancienne_date} → {nouvelle_date}"
                 ))
 
-            if nouveau_commercial != self.ancien_commercial:
+            if (
+                not self._is_cloud_mode
+                and nouveau_commercial != self.ancien_commercial
+            ):
                 ancien_commercial = self.ancien_commercial or "Aucun"
                 commercial = nouveau_commercial or "Aucun"
                 modifications.append((

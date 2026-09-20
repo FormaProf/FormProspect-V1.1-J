@@ -541,7 +541,7 @@ class CloudProspectDataProvider(ProspectDataProvider):
 
         value = str(owner_value or "").strip()
 
-        if not value:
+        if not value or value.casefold() in {"non affecté", "non assigné"}:
             return ""
 
         self._load_owner_names()
@@ -792,13 +792,14 @@ class CloudProspectDataProvider(ProspectDataProvider):
             "next_action_at": parse_datetime(date_prochaine_action),
         }
 
+        owner_label = str(commercial_assigne or "").strip()
         owner_user_id = self._owner_id(commercial_assigne)
+        current_owner_id = str(current.get("owner_user_id") or "").strip()
 
-        if (
-            owner_user_id
-            and owner_user_id
-            != str(current.get("owner_user_id", ""))
-        ):
+        if owner_label.casefold() in {"", "non affecté", "non assigné"}:
+            if current_owner_id:
+                payload["owner_user_id"] = None
+        elif owner_user_id and owner_user_id != current_owner_id:
             payload["owner_user_id"] = owner_user_id
 
         self.api_client.update_prospect(str(prospect_id), payload)

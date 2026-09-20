@@ -433,6 +433,15 @@ class CloudAPIClient:
             payload,
         )
 
+    def list_prospect_assignment_history(
+        self,
+        prospect_id: str,
+    ) -> list[dict]:
+        payload = self.get_json(
+            f"/prospects/{prospect_id}/assignment-history"
+        )
+        return payload if isinstance(payload, list) else []
+
     def change_stage(
         self,
         prospect_id: str,
