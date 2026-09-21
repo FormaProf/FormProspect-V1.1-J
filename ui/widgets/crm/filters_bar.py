@@ -1,6 +1,12 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QPushButton
 from PySide6.QtCore import Signal
 
+from ui.crm_premium_theme import (
+    CRM_THEME_CLASSIC,
+    crm_palette,
+    normalize_crm_theme,
+)
+
 
 class CRMFiltersBar(QWidget):
     """Barre de recherche et de filtres CRM réutilisable.
@@ -65,6 +71,106 @@ class CRMFiltersBar(QWidget):
         layout.addWidget(self.recherche_input)
         layout.addLayout(filtres_layout)
         self.setLayout(layout)
+        self._current_theme = CRM_THEME_CLASSIC
+
+    def apply_theme(self, theme=None):
+        theme = normalize_crm_theme(theme)
+        self._current_theme = theme
+
+        if theme == CRM_THEME_CLASSIC:
+            self.recherche_input.setStyleSheet(self.style_input())
+            for combo in (
+                self.project_filtre,
+                self.pipeline_filtre,
+                self.priorite_filtre,
+                self.commercial_filtre,
+                self.ville_filtre,
+            ):
+                combo.setStyleSheet(self.style_combo_filtre())
+            self.bouton_reset.setStyleSheet(self.style_bouton_reset())
+            return
+
+        p = crm_palette(theme)
+        self.recherche_input.setStyleSheet(f"""
+            QLineEdit {{
+                background:{p['surface_alt']};
+                color:{p['text']};
+                border:1px solid {p['border']};
+                border-radius:12px;
+                padding-left:14px;
+                padding-right:12px;
+                font-size:13px;
+                font-weight:650;
+                selection-background-color:{p['primary']};
+                selection-color:#FFFFFF;
+            }}
+            QLineEdit:hover {{
+                border:1px solid {p['border_strong']};
+            }}
+            QLineEdit:focus {{
+                border:1px solid {p['cyan']};
+                background:{p['surface']};
+            }}
+        """)
+
+        combo_style = f"""
+            QComboBox {{
+                background:{p['surface_alt']};
+                color:{p['text_soft']};
+                border:1px solid {p['border']};
+                border-radius:11px;
+                padding-left:11px;
+                padding-right:9px;
+                font-size:12px;
+                font-weight:750;
+            }}
+            QComboBox:hover {{
+                border:1px solid {p['border_strong']};
+                color:{p['text']};
+            }}
+            QComboBox:focus {{
+                border:1px solid {p['cyan']};
+            }}
+            QComboBox::drop-down {{
+                border:none;
+                width:25px;
+            }}
+            QComboBox QAbstractItemView {{
+                background:{p['surface']};
+                color:{p['text']};
+                border:1px solid {p['border']};
+                outline:0;
+                selection-background-color:{p['surface_soft']};
+                selection-color:{p['text']};
+                padding:5px;
+            }}
+        """
+        for combo in (
+            self.project_filtre,
+            self.pipeline_filtre,
+            self.priorite_filtre,
+            self.commercial_filtre,
+            self.ville_filtre,
+        ):
+            combo.setStyleSheet(combo_style)
+
+        self.bouton_reset.setStyleSheet(f"""
+            QPushButton {{
+                background:{p['surface_soft']};
+                color:{p['muted']};
+                border:1px solid {p['border']};
+                border-radius:11px;
+                font-size:12px;
+                font-weight:850;
+                padding-left:14px;
+                padding-right:14px;
+            }}
+            QPushButton:hover {{
+                background:{p['surface_alt']};
+                color:{p['cyan']};
+                border:1px solid {p['primary']};
+            }}
+        """)
 
     def style_input(self):
         return """

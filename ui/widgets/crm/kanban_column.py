@@ -3,6 +3,12 @@ from PySide6.QtCore import Qt, Signal, QEvent
 
 from core.crm import PIPELINE_COLORS
 from ui.widgets.crm.kanban_card import KanbanCard
+from ui.crm_premium_theme import (
+    CRM_THEME_CLASSIC,
+    CRM_THEME_DARK,
+    crm_palette,
+    normalize_crm_theme,
+)
 
 
 class KanbanColumn(QFrame):
@@ -17,6 +23,7 @@ class KanbanColumn(QFrame):
         self.pipeline_name = pipeline_name
         self.cards_count = 0
         self._highlighted = False
+        self._current_theme = CRM_THEME_CLASSIC
 
         self.setObjectName("KanbanColumn")
         self.setAcceptDrops(True)
@@ -99,11 +106,23 @@ class KanbanColumn(QFrame):
         self._update_header()
 
     def _style_column(self, highlight=False):
-        if highlight:
+        if self._current_theme == CRM_THEME_CLASSIC:
+            if highlight:
+                return """
+                    QFrame#KanbanColumn {
+                        background-color: #F7FBFF;
+                        border: 2px solid #338CE4;
+                        border-radius: 18px;
+                    }
+                    QLabel {
+                        background: transparent;
+                    }
+                """
+
             return """
                 QFrame#KanbanColumn {
-                    background-color: #F7FBFF;
-                    border: 2px solid #338CE4;
+                    background-color: #FBFCFE;
+                    border: 1px solid #E3EAF2;
                     border-radius: 18px;
                 }
                 QLabel {
@@ -111,15 +130,20 @@ class KanbanColumn(QFrame):
                 }
             """
 
-        return """
-            QFrame#KanbanColumn {
-                background-color: #FBFCFE;
-                border: 1px solid #E3EAF2;
-                border-radius: 18px;
-            }
-            QLabel {
-                background: transparent;
-            }
+        p = crm_palette(self._current_theme)
+        dark = self._current_theme == CRM_THEME_DARK
+        background = "#081827" if dark else "#F4FAFF"
+        border = p["cyan"] if highlight else p["border"]
+        width = 2 if highlight else 1
+        return f"""
+            QFrame#KanbanColumn {{
+                background:{background};
+                border:{width}px solid {border};
+                border-radius:18px;
+            }}
+            QLabel {{
+                background:transparent;
+            }}
         """
 
     def _set_highlight(self, enabled):
@@ -144,6 +168,7 @@ class KanbanColumn(QFrame):
 
     def add_card(self, prospect):
         card = KanbanCard(prospect)
+        card.apply_theme(self._current_theme)
         card.double_clicked.connect(
             self.card_double_clicked.emit
         )
@@ -153,6 +178,64 @@ class KanbanColumn(QFrame):
         )
         self.cards_count += 1
         self._update_header()
+
+    def apply_theme(self, theme=None):
+        self._current_theme = normalize_crm_theme(theme)
+        self.setStyleSheet(self._style_column(highlight=self._highlighted))
+        self._update_header()
+
+        p = crm_palette(self._current_theme)
+        if self._current_theme == CRM_THEME_CLASSIC:
+            self.scroll_area.setStyleSheet(
+                """
+                QScrollArea {
+                    background: transparent;
+                    border: none;
+                }
+                QScrollBar:vertical {
+                    background: transparent;
+                    width: 8px;
+                    margin: 3px 1px 3px 1px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #CBD5E1;
+                    min-height: 30px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #94A3B8;
+                }
+                """
+            )
+        else:
+            self.scroll_area.setStyleSheet(f"""
+                QScrollArea {{
+                    background:transparent;
+                    border:none;
+                }}
+                QScrollBar:vertical {{
+                    background:transparent;
+                    width:5px;
+                    margin:2px 0 2px 0;
+                }}
+                QScrollBar::handle:vertical {{
+                    background:{p['border_strong']};
+                    min-height:30px;
+                    border-radius:2px;
+                }}
+                QScrollBar::handle:vertical:hover {{
+                    background:{p['primary']};
+                }}
+                QScrollBar::add-line:vertical,
+                QScrollBar::sub-line:vertical {{
+                    height:0;
+                }}
+            """)
+
+        for index in range(self.cards_layout.count() - 1):
+            widget = self.cards_layout.itemAt(index).widget()
+            if widget is not None and hasattr(widget, "apply_theme"):
+                widget.apply_theme(self._current_theme)
 
     def _has_card_mime(self, event):
         return event.mimeData().hasFormat(
@@ -277,6 +360,28 @@ class KanbanColumn(QFrame):
     def dropEvent(self, event):
         self._handle_drop(event)
 
+    def _pipeline_accent(self):
+        name = str(self.pipeline_name or "").casefold()
+        if "perdu" in name:
+            return "#F87171"
+        if "client" in name:
+            return "#5EE6A8"
+        if "négoci" in name or "negoci" in name:
+            return "#F7B955"
+        if "proposition" in name:
+            return "#A78BFA"
+        if "rdv" in name:
+            return "#F38CC6"
+        if "lead chaud" in name:
+            return "#FF8B5B"
+        if "contacté" in name or "contacte" in name:
+            return "#4DA3FF"
+        if "contacter" in name or "qualification" in name:
+            return "#F6D44A"
+        if "nouveau" in name:
+            return "#62D6FF"
+        return "#6AAEF5"
+
     def _update_header(self):
         couleur = PIPELINE_COLORS.get(
             self.pipeline_name,
@@ -296,15 +401,53 @@ class KanbanColumn(QFrame):
 
         self.header.setText(title)
         self.count_badge.setText(str(self.cards_count))
+
+        if self._current_theme == CRM_THEME_CLASSIC:
+            self.header.setStyleSheet(
+                "font-size:12px; font-weight:900; color:#172033; "
+                "background:transparent; border:none;"
+            )
+            self.count_badge.setStyleSheet(
+                "font-size:11px; font-weight:900; color:#23344D; "
+                "background:#FFFFFF; border:1px solid #DCE5EF; border-radius:10px;"
+            )
+            self.header_frame.setStyleSheet(
+                f"""
+                QFrame#KanbanHeader {{
+                    background-color: {couleur};
+                    border: 1px solid #E3EAF2;
+                    border-radius: 13px;
+                }}
+                QLabel {{
+                    background: transparent;
+                }}
+                """
+            )
+            return
+
+        p = crm_palette(self._current_theme)
+        dark = self._current_theme == CRM_THEME_DARK
+        accent = self._pipeline_accent()
+        header_bg = "#0C2338" if dark else "#FFFFFF"
+        self.header.setStyleSheet(
+            f"font-size:12px; font-weight:950; color:{p['text']}; "
+            "background:transparent; border:none;"
+        )
+        self.count_badge.setStyleSheet(
+            f"font-size:11px; font-weight:950; color:{accent}; "
+            f"background:{p['surface_soft']}; border:1px solid {p['border_strong']}; "
+            "border-radius:10px;"
+        )
         self.header_frame.setStyleSheet(
             f"""
             QFrame#KanbanHeader {{
-                background-color: {couleur};
-                border: 1px solid #E3EAF2;
-                border-radius: 13px;
+                background:{header_bg};
+                border:1px solid {p['border']};
+                border-top:3px solid {accent};
+                border-radius:13px;
             }}
             QLabel {{
-                background: transparent;
+                background:transparent;
             }}
             """
         )

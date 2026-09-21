@@ -36,6 +36,14 @@ from services.system import ActivityService, RecoveryManager
 from workers.enrichment_worker import EnrichmentWorker
 from core.session import SessionState
 from services.cloud_runtime import CloudRuntime
+from ui.crm_premium_theme import (
+    CRM_THEME_CLASSIC,
+    crm_palette,
+    normalize_crm_theme,
+    primary_button_qss,
+    secondary_button_qss,
+    view_button_qss,
+)
 
 
 
@@ -108,11 +116,13 @@ class ProspectsPage(QWidget):
         self.setStyleSheet("background:#F8FAFD;")
 
         layout = QVBoxLayout()
+        self.root_layout = layout
         layout.setContentsMargins(30, 26, 30, 30)
         layout.setSpacing(16)
 
         # --- Hero / entête CRM ---
         hero = QFrame()
+        self.hero = hero
         hero.setObjectName("CRMHero")
         hero.setStyleSheet("""
             QFrame#CRMHero {
@@ -136,12 +146,14 @@ class ProspectsPage(QWidget):
         hero_texts.setSpacing(3)
 
         eyebrow = QLabel("CRM  •  PORTEFEUILLE COMMERCIAL")
+        self.hero_eyebrow = eyebrow
         eyebrow.setStyleSheet(
             "font-size:10px; font-weight:900; letter-spacing:1.1px; "
             "color:#338CE4; border:none; background:transparent;"
         )
 
         titre = QLabel("Prospects & opportunités")
+        self.hero_title = titre
         titre.setStyleSheet(
             "font-size:28px; font-weight:900; color:#0B1220; "
             "border:none; background:transparent;"
@@ -156,6 +168,11 @@ class ProspectsPage(QWidget):
         hero_texts.addWidget(titre)
         hero_texts.addWidget(self.label_info)
 
+        self.hero_mode_chip = QLabel("●  AI CRM  •  LIVE")
+        self.hero_mode_chip.setAlignment(Qt.AlignCenter)
+        self.hero_mode_chip.setFixedHeight(30)
+        self.hero_mode_chip.setMinimumWidth(112)
+
         self.bouton_rafraichir = QPushButton("↻  Rafraîchir")
         self.bouton_rafraichir.setFixedHeight(40)
         self.bouton_rafraichir.clicked.connect(
@@ -164,6 +181,7 @@ class ProspectsPage(QWidget):
         self.bouton_rafraichir.setStyleSheet(self.style_bouton_secondaire())
 
         hero_layout.addLayout(hero_texts, 1)
+        hero_layout.addWidget(self.hero_mode_chip)
         hero_layout.addWidget(self.bouton_rafraichir)
 
         # --- Filtres ---
@@ -210,6 +228,7 @@ class ProspectsPage(QWidget):
         """)
 
         filters_card = QFrame()
+        self.filters_card = filters_card
         filters_card.setObjectName("CRMCard")
         filters_card.setStyleSheet(self._card_style())
         self._apply_shadow(filters_card, blur=24, y=6, alpha=16)
@@ -218,11 +237,13 @@ class ProspectsPage(QWidget):
         filters_layout.setSpacing(10)
         filters_header = QHBoxLayout()
         filters_title = QLabel("Filtres intelligents")
+        self.filters_title = filters_title
         filters_title.setStyleSheet(
             "font-size:13px; font-weight:900; color:#23344D; "
             "border:none; background:transparent;"
         )
         filters_hint = QLabel("Affinez votre portefeuille en quelques secondes")
+        self.filters_hint = filters_hint
         filters_hint.setStyleSheet(
             "font-size:10px; color:#94A3B8; border:none; background:transparent;"
         )
@@ -235,11 +256,13 @@ class ProspectsPage(QWidget):
 
         # --- Barre d'actions ---
         actions_card = QFrame()
+        self.actions_card = actions_card
         actions_card.setObjectName("CRMCard")
         actions_card.setStyleSheet(self._card_style())
         self._apply_shadow(actions_card, blur=24, y=6, alpha=14)
 
         toolbar_layout = QHBoxLayout(actions_card)
+        self.toolbar_layout = toolbar_layout
         toolbar_layout.setContentsMargins(14, 12, 14, 12)
         toolbar_layout.setSpacing(10)
 
@@ -310,6 +333,7 @@ class ProspectsPage(QWidget):
         )
 
         bouton_scoring = QPushButton("Calculer les scores")
+        self.bouton_scoring = bouton_scoring
         bouton_scoring.setFixedHeight(40)
         bouton_scoring.clicked.connect(self.recalculer_scores)
 
@@ -319,9 +343,52 @@ class ProspectsPage(QWidget):
         self.bouton_exporter.setStyleSheet(self.style_bouton_secondaire())
         bouton_scoring.setStyleSheet(self.style_bouton_principal())
 
+        # Pagination inline réservée aux thèmes Premium. La pagination historique
+        # reste intacte et réapparaît automatiquement en thème Classique.
+        self.command_pagination_frame = QFrame()
+        self.command_pagination_frame.setObjectName("CRMInlinePagination")
+        command_pagination_layout = QHBoxLayout(self.command_pagination_frame)
+        command_pagination_layout.setContentsMargins(8, 0, 8, 0)
+        command_pagination_layout.setSpacing(5)
+
+        self.command_bouton_premiere_page = QPushButton("«")
+        self.command_bouton_page_precedente = QPushButton("‹")
+        self.command_label_pagination = QLabel("Page 1 / 1")
+        self.command_bouton_page_suivante = QPushButton("›")
+        self.command_bouton_derniere_page = QPushButton("»")
+        self.command_label_affichage = QLabel("0 / 0")
+
+        self.command_bouton_premiere_page.clicked.connect(self.aller_premiere_page)
+        self.command_bouton_page_precedente.clicked.connect(self.aller_page_precedente)
+        self.command_bouton_page_suivante.clicked.connect(self.aller_page_suivante)
+        self.command_bouton_derniere_page.clicked.connect(self.aller_derniere_page)
+
+        for bouton in (
+            self.command_bouton_premiere_page,
+            self.command_bouton_page_precedente,
+            self.command_bouton_page_suivante,
+            self.command_bouton_derniere_page,
+        ):
+            bouton.setFixedSize(30, 30)
+
+        self.command_label_pagination.setMinimumWidth(72)
+        self.command_label_pagination.setAlignment(Qt.AlignCenter)
+        self.command_label_affichage.setMinimumWidth(76)
+        self.command_label_affichage.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+
+        command_pagination_layout.addWidget(self.command_bouton_premiere_page)
+        command_pagination_layout.addWidget(self.command_bouton_page_precedente)
+        command_pagination_layout.addWidget(self.command_label_pagination)
+        command_pagination_layout.addWidget(self.command_bouton_page_suivante)
+        command_pagination_layout.addWidget(self.command_bouton_derniere_page)
+        command_pagination_layout.addSpacing(4)
+        command_pagination_layout.addWidget(self.command_label_affichage)
+        self.command_pagination_frame.hide()
+
         toolbar_layout.addWidget(self.bouton_tableau)
         toolbar_layout.addWidget(self.bouton_kanban)
         toolbar_layout.addSpacing(8)
+        toolbar_layout.addWidget(self.command_pagination_frame)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(self.bouton_ajouter_prospect)
         toolbar_layout.addWidget(self.bouton_enrichir_selection)
@@ -330,9 +397,11 @@ class ProspectsPage(QWidget):
 
         # --- Pagination compacte ---
         pagination_card = QFrame()
+        self.pagination_card = pagination_card
         pagination_card.setObjectName("CRMCard")
         pagination_card.setStyleSheet(self._card_style())
         pagination_layout = QHBoxLayout(pagination_card)
+        self.pagination_layout = pagination_layout
         pagination_layout.setContentsMargins(12, 9, 12, 9)
         pagination_layout.setSpacing(7)
 
@@ -430,6 +499,7 @@ class ProspectsPage(QWidget):
         self.views_stack.addWidget(self.kanban)
 
         view_card = QFrame()
+        self.view_card = view_card
         view_card.setObjectName("CRMViewCard")
         view_card.setStyleSheet("""
             QFrame#CRMViewCard {
@@ -450,7 +520,242 @@ class ProspectsPage(QWidget):
         layout.addWidget(view_card, 1)
 
         self.setLayout(layout)
+        self._current_visual_theme = None
+        self._apply_visual_theme(force=True)
         self.mettre_a_jour_pagination_ui()
+
+    def showEvent(self, event):
+        self._apply_visual_theme()
+        super().showEvent(event)
+
+    def _apply_visual_theme(self, force=False):
+        theme = normalize_crm_theme()
+        if not force and theme == self._current_visual_theme:
+            return
+
+        self._current_visual_theme = theme
+        p = crm_palette(theme)
+        classic = theme == CRM_THEME_CLASSIC
+        self.setStyleSheet(f"background:{p['bg']};")
+
+        if classic:
+            self.hero.setStyleSheet("""
+                QFrame#CRMHero {
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #FFFFFF,
+                        stop:0.72 #F7FBFF,
+                        stop:1 #EAF4FF
+                    );
+                    border:1px solid #E4EBF4;
+                    border-radius:22px;
+                }
+            """)
+            self.hero_eyebrow.setStyleSheet(
+                "font-size:10px; font-weight:900; letter-spacing:1.1px; "
+                "color:#338CE4; border:none; background:transparent;"
+            )
+            self.hero_title.setStyleSheet(
+                "font-size:28px; font-weight:900; color:#0B1220; "
+                "border:none; background:transparent;"
+            )
+            self.label_info.setStyleSheet(
+                "font-size:12px; color:#6B7A90; border:none; background:transparent;"
+            )
+            card_style = self._card_style()
+            self.filters_card.setStyleSheet(card_style)
+            self.actions_card.setStyleSheet(card_style)
+            self.pagination_card.setStyleSheet(card_style)
+            self.view_card.setStyleSheet("""
+                QFrame#CRMViewCard {
+                    background:#FFFFFF;
+                    border:1px solid #E4EBF4;
+                    border-radius:18px;
+                }
+            """)
+            self.filters_title.setStyleSheet(
+                "font-size:13px; font-weight:900; color:#23344D; "
+                "border:none; background:transparent;"
+            )
+            self.filters_hint.setStyleSheet(
+                "font-size:10px; color:#94A3B8; border:none; background:transparent;"
+            )
+            self.label_pagination.setStyleSheet(
+                "font-size:12px; font-weight:900; color:#23344D; "
+                "padding:0 8px; border:none; background:transparent;"
+            )
+            self.label_affichage.setStyleSheet(
+                "font-size:11px; font-weight:650; color:#7A899C; "
+                "border:none; background:transparent;"
+            )
+            self.hero_mode_chip.hide()
+        else:
+            self.hero.setStyleSheet(f"""
+                QFrame#CRMHero {{
+                    background:qlineargradient(
+                        x1:0, y1:0, x2:1, y2:1,
+                        stop:0 {p['header_start']},
+                        stop:0.56 {p['header_mid']},
+                        stop:1 {p['header_end']}
+                    );
+                    border:1px solid {p['border']};
+                    border-radius:22px;
+                }}
+            """)
+            self.hero_eyebrow.setStyleSheet(
+                f"font-size:10px; font-weight:950; letter-spacing:1.2px; "
+                f"color:{p['cyan']}; border:none; background:transparent;"
+            )
+            self.hero_title.setStyleSheet(
+                f"font-size:29px; font-weight:950; color:{p['text']}; "
+                "border:none; background:transparent;"
+            )
+            self.label_info.setStyleSheet(
+                f"font-size:12px; color:{p['muted']}; border:none; background:transparent;"
+            )
+            card_style = f"""
+                QFrame#CRMCard {{
+                    background:{p['surface']};
+                    border:1px solid {p['border']};
+                    border-radius:18px;
+                }}
+            """
+            self.filters_card.setStyleSheet(card_style)
+            self.actions_card.setStyleSheet(card_style)
+            self.pagination_card.setStyleSheet(card_style)
+            self.view_card.setStyleSheet(f"""
+                QFrame#CRMViewCard {{
+                    background:{p['surface']};
+                    border:1px solid {p['border']};
+                    border-radius:20px;
+                }}
+            """)
+            self.filters_title.setStyleSheet(
+                f"font-size:13px; font-weight:950; color:{p['text_soft']}; "
+                "border:none; background:transparent;"
+            )
+            self.filters_hint.setStyleSheet(
+                f"font-size:10px; color:{p['muted_2']}; border:none; background:transparent;"
+            )
+            self.label_pagination.setStyleSheet(
+                f"font-size:12px; font-weight:950; color:{p['text_soft']}; "
+                "padding:0 8px; border:none; background:transparent;"
+            )
+            self.label_affichage.setStyleSheet(
+                f"font-size:11px; font-weight:700; color:{p['muted']}; "
+                "border:none; background:transparent;"
+            )
+            self.hero_mode_chip.setStyleSheet(
+                f"font-size:9px; font-weight:950; letter-spacing:0.8px; "
+                f"color:{p['cyan']}; background:{p['surface_alt']}; "
+                f"border:1px solid {p['border_strong']}; border-radius:10px; "
+                "padding:0 10px;"
+            )
+            self.hero_mode_chip.show()
+
+        self.bouton_rafraichir.setStyleSheet(secondary_button_qss(theme))
+        self.bouton_tableau.setStyleSheet(view_button_qss(theme))
+        self.bouton_kanban.setStyleSheet(view_button_qss(theme))
+        self.bouton_ajouter_prospect.setStyleSheet(primary_button_qss(theme))
+        self.bouton_enrichir_selection.setStyleSheet(primary_button_qss(theme))
+        self.bouton_exporter.setStyleSheet(secondary_button_qss(theme))
+        self.bouton_scoring.setStyleSheet(primary_button_qss(theme))
+
+        for button in (
+            self.bouton_premiere_page,
+            self.bouton_page_precedente,
+            self.bouton_page_suivante,
+            self.bouton_derniere_page,
+        ):
+            button.setStyleSheet(secondary_button_qss(theme))
+
+        if hasattr(self.filters_bar, "apply_theme"):
+            self.filters_bar.apply_theme(theme)
+        if hasattr(self.table, "apply_theme"):
+            self.table.apply_theme(theme)
+        if hasattr(self.kanban, "apply_theme"):
+            self.kanban.apply_theme(theme)
+
+        self._sync_premium_command_bar(theme)
+
+    def _sync_premium_command_bar(self, theme):
+        premium = theme != CRM_THEME_CLASSIC
+        self.command_pagination_frame.setVisible(premium)
+        self.pagination_card.setVisible(not premium)
+
+        if premium:
+            self.root_layout.setSpacing(12)
+            self.toolbar_layout.setContentsMargins(12, 8, 12, 8)
+            self.toolbar_layout.setSpacing(7)
+            for button in (
+                self.bouton_tableau,
+                self.bouton_kanban,
+                self.bouton_ajouter_prospect,
+                self.bouton_enrichir_selection,
+                self.bouton_exporter,
+                self.bouton_scoring,
+            ):
+                button.setFixedHeight(36)
+        else:
+            self.root_layout.setSpacing(16)
+            self.toolbar_layout.setContentsMargins(14, 12, 14, 12)
+            self.toolbar_layout.setSpacing(10)
+            for button in (
+                self.bouton_tableau,
+                self.bouton_kanban,
+                self.bouton_ajouter_prospect,
+                self.bouton_enrichir_selection,
+                self.bouton_exporter,
+                self.bouton_scoring,
+            ):
+                button.setFixedHeight(40)
+
+        self._sync_inline_pagination_ui(theme)
+
+    def _sync_inline_pagination_ui(self, theme=None):
+        if not hasattr(self, "command_label_pagination"):
+            return
+
+        theme = normalize_crm_theme(theme or self._current_visual_theme)
+        p = crm_palette(theme)
+        premium = theme != CRM_THEME_CLASSIC
+
+        self.command_label_pagination.setText(self.label_pagination.text())
+        total = self.total_filtre_courant
+        debut, fin = self.plage_affichee()
+        self.command_label_affichage.setText(
+            f"{debut}-{fin} / {total}" if total > 0 else "0 / 0"
+        )
+
+        source_buttons = (
+            self.bouton_premiere_page,
+            self.bouton_page_precedente,
+            self.bouton_page_suivante,
+            self.bouton_derniere_page,
+        )
+        command_buttons = (
+            self.command_bouton_premiere_page,
+            self.command_bouton_page_precedente,
+            self.command_bouton_page_suivante,
+            self.command_bouton_derniere_page,
+        )
+        for source, target in zip(source_buttons, command_buttons):
+            target.setEnabled(source.isEnabled())
+            target.setStyleSheet(secondary_button_qss(theme))
+
+        if premium:
+            self.command_pagination_frame.setStyleSheet(
+                f"QFrame#CRMInlinePagination {{ background:{p['surface_alt']}; "
+                f"border:1px solid {p['border']}; border-radius:11px; }}"
+            )
+            self.command_label_pagination.setStyleSheet(
+                f"font-size:11px; font-weight:950; color:{p['text_soft']}; "
+                "background:transparent; border:none;"
+            )
+            self.command_label_affichage.setStyleSheet(
+                f"font-size:10px; font-weight:750; color:{p['muted']}; "
+                "background:transparent; border:none;"
+            )
 
     def _has_data_source(self):
         return (
@@ -609,7 +914,10 @@ class ProspectsPage(QWidget):
         if self.views_stack.currentIndex() == 0:
             self.table.afficher_lignes(self.current_prospects, start_number=premier_numero)
         else:
-            self.kanban.afficher_lignes(self.current_prospects)
+            self.kanban.afficher_lignes(
+                self.current_prospects,
+                filters_active=self.filters_bar.filtres_actifs(),
+            )
 
     def offset_courant(self):
         return max(0, (self.page_courante - 1) * self.DISPLAY_LIMIT)
@@ -994,6 +1302,8 @@ class ProspectsPage(QWidget):
             self.label_affichage.setText("Aucun projet actif")
         elif not has_results:
             self.label_affichage.setText("Aucun prospect affiché")
+
+        self._sync_inline_pagination_ui()
 
     def aller_premiere_page(self):
         if self.page_courante == 1:

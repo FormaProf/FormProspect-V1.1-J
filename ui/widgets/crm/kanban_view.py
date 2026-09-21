@@ -3,6 +3,11 @@ from PySide6.QtCore import Qt, Signal, QTimer
 
 from core.crm import PIPELINE, PIPELINE_DEFAULT
 from ui.widgets.crm.kanban_column import KanbanColumn
+from ui.crm_premium_theme import (
+    CRM_THEME_CLASSIC,
+    crm_palette,
+    normalize_crm_theme,
+)
 
 
 class KanbanView(QWidget):
@@ -19,6 +24,7 @@ class KanbanView(QWidget):
         super().__init__()
         self.columns = {}
         self._auto_scroll_direction = 0
+        self._current_theme = CRM_THEME_CLASSIC
 
         root_layout = QVBoxLayout()
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -76,6 +82,7 @@ class KanbanView(QWidget):
         column.card_double_clicked.connect(self.prospect_double_clicked.emit)
         column.card_dropped.connect(self._handle_card_dropped)
         column.card_drag_moved.connect(self._handle_drag_position)
+        column.apply_theme(self._current_theme)
 
     def _build_columns(self):
         for pipeline in PIPELINE:
@@ -85,7 +92,71 @@ class KanbanView(QWidget):
             self.columns_layout.addWidget(column)
         self.columns_layout.addStretch()
 
-    def afficher_lignes(self, prospects):
+    def apply_theme(self, theme=None):
+        self._current_theme = normalize_crm_theme(theme)
+        p = crm_palette(self._current_theme)
+
+        if self._current_theme == CRM_THEME_CLASSIC:
+            self.info_label.setStyleSheet(
+                "font-size:12px; color:#62748A; font-weight:700; "
+                "padding:2px 2px 4px 2px; background:transparent; border:none;"
+            )
+            self.scroll_area.setStyleSheet(
+                """
+                QScrollArea {
+                    background: transparent;
+                    border: none;
+                }
+                QScrollBar:horizontal {
+                    background: transparent;
+                    height: 10px;
+                    margin: 2px 4px 2px 4px;
+                }
+                QScrollBar::handle:horizontal {
+                    background: #CBD5E1;
+                    min-width: 44px;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:horizontal:hover {
+                    background: #94A3B8;
+                }
+                """
+            )
+        else:
+            self.info_label.setStyleSheet(
+                f"font-size:11px; color:{p['muted']}; font-weight:850; "
+                "padding:3px 3px 5px 3px; background:transparent; border:none;"
+            )
+            self.scroll_area.setStyleSheet(f"""
+                QScrollArea {{
+                    background:transparent;
+                    border:none;
+                }}
+                QScrollBar:horizontal {{
+                    background:transparent;
+                    height:5px;
+                    margin:1px 4px 1px 4px;
+                }}
+                QScrollBar::handle:horizontal {{
+                    background:{p['border_strong']};
+                    min-width:44px;
+                    border-radius:2px;
+                }}
+                QScrollBar::handle:horizontal:hover {{
+                    background:{p['primary']};
+                }}
+                QScrollBar::add-line:horizontal,
+                QScrollBar::sub-line:horizontal {{
+                    width:0;
+                }}
+            """)
+
+        self.columns_layout.setSpacing(16 if self._current_theme == CRM_THEME_CLASSIC else 12)
+
+        for column in self.columns.values():
+            column.apply_theme(self._current_theme)
+
+    def afficher_lignes(self, prospects, *, filters_active=False):
         self._stop_auto_scroll()
 
         for column in self.columns.values():
@@ -103,8 +174,9 @@ class KanbanView(QWidget):
 
             column.add_card(prospect)
 
+        filter_suffix = "  •  filtres actifs" if filters_active else ""
         self.info_label.setText(
-            f"Pipeline commercial  •  {len(prospects)} prospect(s) affiché(s)  •  filtres actifs"
+            f"Pipeline commercial  •  {len(prospects)} prospect(s) affiché(s){filter_suffix}"
         )
 
     def _handle_card_dropped(self, prospect_id, pipeline_name):

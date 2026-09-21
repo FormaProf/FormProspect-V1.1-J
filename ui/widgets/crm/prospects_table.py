@@ -8,6 +8,11 @@ from PySide6.QtGui import QColor, QBrush, QPainter, QPen, QFont
 from PySide6.QtCore import Qt, QSettings, QTimer, Signal, QRect
 
 from core.crm import PIPELINE_DEFAULT, PIPELINE_COLORS, PRIORITE_DEFAULT, ACTION_DEFAULT
+from ui.crm_premium_theme import (
+    CRM_THEME_CLASSIC,
+    crm_palette,
+    normalize_crm_theme,
+)
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -45,16 +50,23 @@ class PremiumCRMDelegate(QStyledItemDelegate):
         "🔴 Perdu": ("Perdu", "#FEF2F2", "#991B1B", "#FECACA"),
     }
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.theme_mode = CRM_THEME_CLASSIC
+
+    def set_theme_mode(self, theme):
+        self.theme_mode = normalize_crm_theme(theme)
+
     def paint(self, painter, option, index):
         painter.save()
+        p = crm_palette(self.theme_mode)
 
-        # Fond de ligne / sélection.
         if option.state & QStyle.State_Selected:
-            painter.fillRect(option.rect, QColor("#EAF4FF"))
+            painter.fillRect(option.rect, QColor(p["row_selected"]))
         elif index.row() % 2:
-            painter.fillRect(option.rect, QColor("#FBFDFF"))
+            painter.fillRect(option.rect, QColor(p["row_odd"]))
         else:
-            painter.fillRect(option.rect, QColor("#FFFFFF"))
+            painter.fillRect(option.rect, QColor(p["row_even"]))
 
         col = index.column()
         raw = str(index.data(Qt.DisplayRole) or "")
@@ -71,7 +83,7 @@ class PremiumCRMDelegate(QStyledItemDelegate):
             self._paint_text(painter, option.rect, raw, col)
 
         # séparateur discret
-        pen = QPen(QColor("#EEF2F6"))
+        pen = QPen(QColor(crm_palette(self.theme_mode)["separator"]))
         pen.setWidth(1)
         painter.setPen(pen)
         painter.drawLine(
@@ -83,17 +95,18 @@ class PremiumCRMDelegate(QStyledItemDelegate):
         painter.restore()
 
     def _paint_text(self, painter, rect, text, col):
-        color = QColor("#1F2937")
+        p = crm_palette(self.theme_mode)
+        color = QColor(p["text_soft"])
         font = painter.font()
 
-        if col == 1:  # Entreprise
+        if col == 1:
             font.setBold(True)
-            color = QColor("#111827")
+            color = QColor(p["text"])
         elif text in {"", "—"}:
-            color = QColor("#A7B2C0")
+            color = QColor(p["muted_2"])
         elif col == 10 and text.lower() not in {"", "aucune", "—"}:
             font.setBold(True)
-            color = QColor("#334155")
+            color = QColor(p["text_soft"])
 
         painter.setFont(font)
         painter.setPen(color)
@@ -249,9 +262,89 @@ class ProspectsTableWidget(QTableWidget):
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.sectionResized.connect(self.sauvegarder_largeur_colonne)
 
-        self.setItemDelegate(PremiumCRMDelegate(self))
+        self._delegate = PremiumCRMDelegate(self)
+        self.setItemDelegate(self._delegate)
         self.setStyleSheet(self.style_tableau())
         QTimer.singleShot(0, self.restaurer_largeurs_colonnes)
+
+    def apply_theme(self, theme=None):
+        theme = normalize_crm_theme(theme)
+        self._delegate.set_theme_mode(theme)
+
+        if theme == CRM_THEME_CLASSIC:
+            self.setStyleSheet(self.style_tableau())
+            self.viewport().update()
+            return
+
+        p = crm_palette(theme)
+        header_bg = "#0C315D" if theme != "ui_dark" else "#0D2942"
+        header_hover = "#174D7C" if theme != "ui_dark" else "#123C60"
+        self.setStyleSheet(f"""
+            QTableWidget {{
+                background:{p['surface']};
+                color:{p['text_soft']};
+                border:1px solid {p['border']};
+                border-radius:18px;
+                gridline-color:transparent;
+                font-size:12px;
+                outline:0;
+            }}
+            QHeaderView {{
+                background:{header_bg};
+                border:none;
+            }}
+            QHeaderView::section {{
+                background:{header_bg};
+                color:#FFFFFF;
+                font-weight:900;
+                font-size:10px;
+                padding:12px 8px;
+                border:none;
+                border-right:1px solid rgba(255,255,255,0.08);
+            }}
+            QHeaderView::section:hover {{
+                background:{header_hover};
+            }}
+            QTableCornerButton::section {{
+                background:{header_bg};
+                border:none;
+            }}
+            QScrollBar:vertical {{
+                background:transparent;
+                width:10px;
+                margin:4px 2px 4px 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background:{p['border_strong']};
+                min-height:38px;
+                border-radius:5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background:{p['primary']};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height:0;
+            }}
+            QScrollBar:horizontal {{
+                background:transparent;
+                height:10px;
+                margin:2px 4px 2px 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background:{p['border_strong']};
+                min-width:38px;
+                border-radius:5px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background:{p['primary']};
+            }}
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {{
+                width:0;
+            }}
+        """)
+        self.viewport().update()
 
     def style_tableau(self):
         return """

@@ -501,9 +501,102 @@ class MainWindow(QMainWindow):
 
         self.ouvrir_projets_commerciaux()
 
+    def _sync_commercial_project_theme_pages(self):
+        # Classique <-> UI 2.0 exige une reconstruction du layout.
+        # Clair <-> Sombre conserve la meme page et ne change que le QSS.
+        from core.theme_settings import THEME_CLASSIC, get_theme_preference
+
+        wants_classic = get_theme_preference() == THEME_CLASSIC
+
+        def has_theme_contract(page):
+            return page is not None and hasattr(page, "_classic_mode")
+
+        def needs_rebuild(page):
+            return (
+                has_theme_contract(page)
+                and bool(getattr(page, "_classic_mode", False)) != wants_classic
+            )
+
+        def swap_page(old_page, new_page):
+            pages = getattr(self, "pages", None)
+            if pages is None:
+                return False
+
+            was_current = pages.currentWidget() is old_page
+            index = pages.indexOf(old_page)
+
+            if index >= 0:
+                pages.insertWidget(index, new_page)
+                pages.removeWidget(old_page)
+            else:
+                pages.addWidget(new_page)
+
+            if was_current:
+                new_page.rafraichir()
+                pages.setCurrentWidget(new_page)
+
+            old_page.deleteLater()
+            return was_current
+
+        admin_page = getattr(self, "admin_commercial_projects_page", None)
+        if has_theme_contract(admin_page):
+            if needs_rebuild(admin_page):
+                service = getattr(
+                    admin_page,
+                    "service",
+                    getattr(self, "admin_commercial_project_service", None),
+                )
+                if service is not None:
+                    replacement = AdminCommercialProjectsPage(
+                        service=service,
+                        auto_refresh=False,
+                    )
+                    swap_page(admin_page, replacement)
+                    self.admin_commercial_projects_page = replacement
+            else:
+                apply_theme = getattr(admin_page, "_apply_visual_theme", None)
+                if callable(apply_theme):
+                    apply_theme()
+
+        commercial_page = getattr(self, "commercial_projects_page", None)
+        if has_theme_contract(commercial_page):
+            if needs_rebuild(commercial_page):
+                service = getattr(
+                    commercial_page,
+                    "service",
+                    getattr(self, "commercial_project_workspace_service", None),
+                )
+                if service is not None:
+                    replacement = CommercialProjectsPage(
+                        service=service,
+                        user_id=str(
+                            getattr(
+                                commercial_page,
+                                "user_id",
+                                getattr(self, "commercial_user_id", ""),
+                            )
+                            or ""
+                        ).strip(),
+                        workspace_mode=str(
+                            getattr(commercial_page, "workspace_mode", "commercial")
+                            or "commercial"
+                        ),
+                        auto_refresh=False,
+                    )
+                    replacement.project_open_requested.connect(
+                        self._ouvrir_projet_commercial_enfant
+                    )
+                    swap_page(commercial_page, replacement)
+                    self.commercial_projects_page = replacement
+            else:
+                apply_theme = getattr(commercial_page, "_apply_visual_theme", None)
+                if callable(apply_theme):
+                    apply_theme()
+
     def ouvrir_admin_projets_commerciaux(self):
         if not SessionState.has_role("Administrateur"):
             return
+        MainWindow._sync_commercial_project_theme_pages(self)
         page = getattr(self, "admin_commercial_projects_page", None)
         if page is None:
             return
@@ -511,6 +604,7 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentWidget(page)
 
     def ouvrir_projets_commerciaux(self):
+        MainWindow._sync_commercial_project_theme_pages(self)
         self.commercial_projects_page.rafraichir()
         self.pages.setCurrentWidget(self.commercial_projects_page)
 
@@ -662,6 +756,9 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
         self.account_page.refresh_appearance_summary()
+        MainWindow._sync_commercial_project_theme_pages(self)
+        self._apply_native_window_theme()
+        QTimer.singleShot(120, self._apply_native_window_theme)
         self.statusBar().showMessage(
             "Apparence enregistrée. Le thème sélectionné s'applique aux écrans UI 2.0.",
             5000,
@@ -690,6 +787,24 @@ class MainWindow(QMainWindow):
                 self.auth_service.logout()
             SessionState.logout()
             QApplication.quit()
+
+    def _apply_native_window_theme(self):
+        from core.theme_settings import get_theme_preference
+        from ui.native_window_theme import (
+            apply_native_window_theme,
+            apply_qt_window_chrome,
+        )
+
+        mode = get_theme_preference()
+        apply_qt_window_chrome(self, mode)
+        apply_native_window_theme(self, mode)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Le handle HWND n'est fiable qu'une fois la fenetre native affichee.
+        # Deux passages legers couvrent aussi les delais de composition DWM.
+        QTimer.singleShot(0, self._apply_native_window_theme)
+        QTimer.singleShot(120, self._apply_native_window_theme)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
