@@ -6,10 +6,11 @@ ROOT = Path(__file__).resolve().parents[1]
 THEME = (ROOT / "ui" / "commercial_projects_theme.py").read_text(encoding="utf-8")
 COMMERCIAL = (ROOT / "ui" / "pages" / "commercial_projects_page.py").read_text(encoding="utf-8")
 ADMIN = (ROOT / "ui" / "pages" / "admin_commercial_projects_page.py").read_text(encoding="utf-8")
+CARD = (ROOT / "ui" / "widgets" / "commercial_project_card.py").read_text(encoding="utf-8")
 
 
 def test_projects_premium_sources_are_valid_python():
-    for source in (THEME, COMMERCIAL, ADMIN):
+    for source in (THEME, COMMERCIAL, ADMIN, CARD):
         ast.parse(source)
 
 
@@ -40,7 +41,7 @@ def test_commercial_workspace_has_command_center_metrics_and_cards():
     for marker in (
         "WORKSPACE  •  PORTEFEUILLE COMMERCIAL",
         "LEADS CHAUDS",
-        'setObjectName("ProjectChoiceCard")',
+        "CommercialProjectCard",
         "Landing Page personnelle",
         "stat_prospects_value",
     ):
@@ -118,3 +119,54 @@ def test_premium_layout_does_not_force_previous_large_side_by_side_geometry():
 def test_project_services_are_not_imported_for_mutation():
     assert "commercial_project_workspace_service.py" not in THEME
     assert "commercial_project_admin_service.py" not in THEME
+
+
+def test_commercial_project_cards_have_thematic_hover_and_btp_hazard_design():
+    for marker in (
+        "class CommercialProjectCard(QPushButton)",
+        "QPropertyAnimation",
+        "hoverProgress = Property",
+        "resolve_project_visual_theme",
+        '"btp": "BTP • CHANTIER"',
+        "_paint_btp_frame",
+        "_paint_btp_artwork",
+        "QGraphicsDropShadowEffect",
+        "OUVRIR LE PROJET",
+    ):
+        assert marker in CARD
+
+
+def test_commercial_page_uses_visual_cards_for_universes_and_projects():
+    assert COMMERCIAL.count("CommercialProjectCard(") >= 2
+    assert 'kicker="UNIVERS COMMERCIAL"' in COMMERCIAL
+    assert 'f"PROJET • {parent_name}"' in COMMERCIAL
+    assert "card.set_theme_mode(mode)" in COMMERCIAL
+
+
+def test_project_cards_v2_have_dense_grid_metric_pills_and_premium_hover():
+    for marker in (
+        "_paint_metric_pills",
+        "_paint_blueprint_grid",
+        "_paint_theme_monogram",
+        "subtitle_text",
+        "metrics:",
+        "lift = 2.6 * self._hover_progress",
+        "EXPLORER L’UNIVERS",
+    ):
+        assert marker in CARD
+
+
+def test_commercial_portfolio_v2_is_top_aligned_and_does_not_leave_large_empty_canvas():
+    for marker in (
+        'self.choice_grid.setAlignment(Qt.AlignTop)',
+        'self.choice_grid.addWidget(bundle, row, col, Qt.AlignTop)',
+        'bundle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)',
+        'def _sync_choice_area_height',
+        'self.choice_scroll.setMaximumHeight(520)',
+        'Votre portefeuille visuel',
+        'ACCÉDER À MA LANDING PAGE',
+    ):
+        assert marker in COMMERCIAL
+
+    assert 'self.layout.addWidget(self.navigation_panel, 1)' not in COMMERCIAL
+    assert 'QWidget#ProjectChoicesHost' in THEME

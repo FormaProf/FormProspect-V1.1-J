@@ -242,22 +242,43 @@ def projects_stylesheet(mode: str | None = None) -> str:
         QPushButton#ProjectChoiceCard:pressed {{
             background:{selected};
         }}
+        QWidget#ProjectCardBundle {{
+            background:transparent;
+            border:none;
+        }}
+        QScrollArea#ProjectChoicesScroll,
+        QScrollArea#ProjectChoicesScroll > QWidget > QWidget,
+        QWidget#ProjectChoicesHost {{
+            background:transparent;
+            border:none;
+        }}
         QPushButton#ProjectLandingAction {{
-            min-height:38px;
+            min-height:42px;
             color:#FFFFFF;
             background:qlineargradient(
                 x1:0, y1:0, x2:1, y2:0,
-                stop:0 #168FD8,
-                stop:1 #5D67F2
+                stop:0 #0F77C8,
+                stop:0.48 #338CE4,
+                stop:1 #665CF6
             );
-            border:1px solid #62AEF2;
-            border-radius:10px;
-            padding:0 13px;
-            font-size:11px;
+            border:1px solid #69B9F3;
+            border-radius:12px;
+            padding:0 15px;
+            font-size:10px;
             font-weight:900;
+            letter-spacing:0.4px;
         }}
         QPushButton#ProjectLandingAction:hover {{
-            border-color:#A8DFFF;
+            background:qlineargradient(
+                x1:0, y1:0, x2:1, y2:0,
+                stop:0 #1487DE,
+                stop:0.48 #45A0F1,
+                stop:1 #796EF8
+            );
+            border-color:#B8E4FF;
+        }}
+        QPushButton#ProjectLandingAction:pressed {{
+            background:#236FBE;
         }}
 
         QLineEdit {{

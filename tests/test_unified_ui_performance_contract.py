@@ -33,7 +33,7 @@ def test_theme_switch_updates_existing_project_pages_without_rebuild():
 def test_commercial_landing_action_is_prominent():
     assert "🚀  Ma Landing Page" in COMMERCIAL
     assert "QPushButton#ProjectLandingAction" in THEME
-    assert "min-height:38px" in THEME
+    assert "min-height:42px" in THEME
 
 
 def test_agenda_is_lazy_cached_and_cloud_refresh_is_backgrounded():

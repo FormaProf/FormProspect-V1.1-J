@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +24,7 @@ from ui.commercial_projects_theme import (
     projects_stylesheet,
     projects_theme_mode,
 )
+from ui.widgets.commercial_project_card import CommercialProjectCard
 
 
 class CommercialProjectsPage(QWidget):
@@ -182,14 +184,14 @@ class CommercialProjectsPage(QWidget):
         nav_header = QHBoxLayout()
         nav_title_box = QVBoxLayout()
         nav_title_box.setSpacing(1)
-        nav_title = QLabel("Accès aux projets")
-        nav_title.setObjectName("PanelTitle")
-        nav_hint = QLabel(
-            "Ouvrez le CRM du projet ou utilisez directement sa Landing Page personnelle."
+        self.nav_title_label = QLabel("Votre portefeuille visuel")
+        self.nav_title_label.setObjectName("PanelTitle")
+        self.nav_hint_label = QLabel(
+            "Chaque univers possède son identité. Survolez une carte puis ouvrez le projet ou sa Landing Page."
         )
-        nav_hint.setObjectName("PanelHint")
-        nav_title_box.addWidget(nav_title)
-        nav_title_box.addWidget(nav_hint)
+        self.nav_hint_label.setObjectName("PanelHint")
+        nav_title_box.addWidget(self.nav_title_label)
+        nav_title_box.addWidget(self.nav_hint_label)
         nav_header.addLayout(nav_title_box)
         nav_header.addStretch(1)
 
@@ -210,24 +212,31 @@ class CommercialProjectsPage(QWidget):
         nav_layout.addWidget(self.empty_label)
 
         self.choice_scroll = QScrollArea()
+        self.choice_scroll.setObjectName("ProjectChoicesScroll")
         self.choice_scroll.setWidgetResizable(True)
         self.choice_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.choice_scroll.setMinimumHeight(160)
+        self.choice_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.choice_scroll.setMinimumHeight(252)
+        self.choice_scroll.setMaximumHeight(520)
 
         self.choice_host = QWidget()
+        self.choice_host.setObjectName("ProjectChoicesHost")
+        self.choice_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.choice_grid = QGridLayout(self.choice_host)
-        self.choice_grid.setContentsMargins(0, 0, 0, 0)
-        self.choice_grid.setHorizontalSpacing(10)
-        self.choice_grid.setVerticalSpacing(10)
+        self.choice_grid.setContentsMargins(2, 2, 2, 4)
+        self.choice_grid.setHorizontalSpacing(14)
+        self.choice_grid.setVerticalSpacing(14)
+        self.choice_grid.setAlignment(Qt.AlignTop)
         self.choice_grid.setColumnStretch(0, 1)
         self.choice_grid.setColumnStretch(1, 1)
         self.choice_scroll.setWidget(self.choice_host)
-        nav_layout.addWidget(self.choice_scroll, 1)
+        nav_layout.addWidget(self.choice_scroll)
 
-        self.layout.addWidget(self.navigation_panel, 1)
+        self.layout.addWidget(self.navigation_panel)
         add_soft_shadow(self.navigation_panel, dark=dark, blur=18, y=4)
 
         self._build_landing_panel(classic=False)
+        self.layout.addStretch(1)
 
     def showEvent(self, event):
         self._install_theme_sync_filter()
@@ -260,6 +269,9 @@ class CommercialProjectsPage(QWidget):
             return
         self._theme_mode = mode
         self.setStyleSheet(projects_stylesheet(mode))
+        for card in (*self.parent_buttons.values(), *self.child_buttons.values()):
+            if isinstance(card, CommercialProjectCard):
+                card.set_theme_mode(mode)
 
     def _metric_card(self, caption: str, value: str):
         card = QFrame()
@@ -482,10 +494,23 @@ class CommercialProjectsPage(QWidget):
         self.stat_prospects_value.setText(str(prospect_count))
         self.stat_hot_value.setText(str(hot_count))
 
+    def _sync_choice_area_height(self, item_count: int, *, has_actions: bool = True) -> None:
+        """Keep small portfolios dense while preserving scrolling for larger ones."""
+        count = max(1, int(item_count or 0))
+        rows = (count + 1) // 2
+        row_height = 248 if has_actions and self.workspace_mode == "commercial" else 205
+        height = min(520, 12 + rows * row_height + max(0, rows - 1) * 14)
+        self.choice_scroll.setMinimumHeight(height)
+        self.choice_scroll.setMaximumHeight(height)
+
     def rafraichir(self):
         if not self._classic_mode:
             self._apply_visual_theme()
         self.back_button.hide()
+        self.nav_title_label.setText("Votre portefeuille visuel")
+        self.nav_hint_label.setText(
+            "Chaque univers possède son identité. Survolez une carte puis ouvrez le projet ou sa Landing Page."
+        )
         self._clear_choice_widgets()
 
         self._landing_project_id = ""
@@ -554,7 +579,7 @@ class CommercialProjectsPage(QWidget):
                     getattr(projects[0], "id", "") or ""
                 ).strip()
                 if project_id:
-                    landing_button = QPushButton("Ma Landing Page")
+                    landing_button = QPushButton("🚀  Ma Landing Page")
                     landing_button.setCursor(Qt.PointingHandCursor)
                     landing_button.clicked.connect(
                         lambda _checked=False, pid=project_id:
@@ -566,24 +591,51 @@ class CommercialProjectsPage(QWidget):
     def _render_parent_choices_premium(self, parents):
         row = 0
         col = 0
+        parents = tuple(parents or ())
         for parent in parents:
             projects = tuple(getattr(parent, "projects", ()) or ())
             hot = int(getattr(parent, "lead_chaud_count", 0) or 0)
             prospects = int(getattr(parent, "prospect_count", 0) or 0)
 
             bundle = QWidget()
+            bundle.setObjectName("ProjectCardBundle")
+            bundle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             bundle_layout = QVBoxLayout(bundle)
             bundle_layout.setContentsMargins(0, 0, 0, 0)
-            bundle_layout.setSpacing(5)
+            bundle_layout.setSpacing(7)
+            bundle_layout.setAlignment(Qt.AlignTop)
 
-            button = QPushButton(
-                f"{parent.name}\n"
+            stats_text = (
                 f"{len(projects)} projet(s)   •   "
                 f"{prospects} prospect(s)   •   "
                 f"{hot} lead(s) chaud(s)"
             )
-            button.setObjectName("ProjectChoiceCard")
-            button.setCursor(Qt.PointingHandCursor)
+            project_names = [
+                str(getattr(project, "name", "") or "").strip()
+                for project in projects
+                if str(getattr(project, "name", "") or "").strip()
+            ]
+            context_text = " ".join(project_names)
+            if len(project_names) == 1:
+                subtitle_text = project_names[0]
+            elif project_names:
+                subtitle_text = f"{len(project_names)} projets disponibles dans cet univers"
+            else:
+                subtitle_text = "Aucun projet affecté pour le moment"
+
+            button = CommercialProjectCard(
+                title=str(getattr(parent, "name", "") or "Univers"),
+                subtitle_text=subtitle_text,
+                stats_text=stats_text,
+                metrics=(
+                    ("PROJETS", str(len(projects))),
+                    ("PROSPECTS", str(prospects)),
+                    ("LEADS CHAUDS", str(hot)),
+                ),
+                context_text=context_text,
+                kicker="UNIVERS COMMERCIAL",
+                theme_mode=self._theme_mode,
+            )
             button.clicked.connect(
                 lambda _checked=False, current_parent=parent:
                 self._on_parent_clicked(current_parent)
@@ -596,9 +648,10 @@ class CommercialProjectsPage(QWidget):
                     getattr(projects[0], "id", "") or ""
                 ).strip()
                 if project_id:
-                    landing_button = QPushButton("🚀  Ma Landing Page")
+                    landing_button = QPushButton("🚀  ACCÉDER À MA LANDING PAGE")
                     landing_button.setObjectName("ProjectLandingAction")
                     landing_button.setCursor(Qt.PointingHandCursor)
+                    landing_button.setFixedHeight(42)
                     landing_button.clicked.connect(
                         lambda _checked=False, pid=project_id:
                         self._show_landing(pid)
@@ -607,11 +660,19 @@ class CommercialProjectsPage(QWidget):
                     bundle_layout.addWidget(landing_button)
 
             self._choice_bundles.append(bundle)
-            self.choice_grid.addWidget(bundle, row, col)
+            self.choice_grid.addWidget(bundle, row, col, Qt.AlignTop)
             col += 1
             if col >= 2:
                 col = 0
                 row += 1
+
+        self._sync_choice_area_height(
+            len(parents),
+            has_actions=any(
+                len(tuple(getattr(parent, "projects", ()) or ())) == 1
+                for parent in parents
+            ),
+        )
 
     def _on_parent_clicked(self, parent):
         projects = tuple(getattr(parent, "projects", ()) or ())
@@ -638,6 +699,12 @@ class CommercialProjectsPage(QWidget):
         had_parent_choices = bool(self.parent_buttons)
         self._clear_choice_widgets()
         self.back_button.setVisible(had_parent_choices)
+
+        parent_name = str(getattr(parent, "name", "") or "Univers").strip()
+        self.nav_title_label.setText(f"Projets • {parent_name}")
+        self.nav_hint_label.setText(
+            "Choisissez un projet pour ouvrir son CRM. Votre Landing Page reste accessible directement sous la carte."
+        )
 
         projects = tuple(getattr(parent, "projects", ()) or ())
         if self._classic_mode:
@@ -675,7 +742,7 @@ class CommercialProjectsPage(QWidget):
                 self.layout.addWidget(button)
 
                 if self.workspace_mode == "commercial":
-                    landing_button = QPushButton("Ma Landing Page")
+                    landing_button = QPushButton("🚀  Ma Landing Page")
                     landing_button.setCursor(Qt.PointingHandCursor)
                     landing_button.clicked.connect(
                         lambda _checked=False, pid=project_id:
@@ -706,17 +773,29 @@ class CommercialProjectsPage(QWidget):
             )
 
             bundle = QWidget()
+            bundle.setObjectName("ProjectCardBundle")
+            bundle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             bundle_layout = QVBoxLayout(bundle)
             bundle_layout.setContentsMargins(0, 0, 0, 0)
-            bundle_layout.setSpacing(5)
+            bundle_layout.setSpacing(7)
+            bundle_layout.setAlignment(Qt.AlignTop)
 
-            button = QPushButton(
-                f"{project_name}\n"
+            stats_text = (
                 f"{prospect_count} prospect(s)   •   "
                 f"{lead_chaud_count} lead(s) chaud(s)"
             )
-            button.setObjectName("ProjectChoiceCard")
-            button.setCursor(Qt.PointingHandCursor)
+            button = CommercialProjectCard(
+                title=project_name,
+                subtitle_text=f"Univers {parent_name}",
+                stats_text=stats_text,
+                metrics=(
+                    ("PROSPECTS", str(prospect_count)),
+                    ("LEADS CHAUDS", str(lead_chaud_count)),
+                ),
+                context_text=parent_name,
+                kicker=f"PROJET • {parent_name}" if parent_name else "PROJET COMMERCIAL",
+                theme_mode=self._theme_mode,
+            )
             button.clicked.connect(
                 lambda _checked=False, pid=project_id:
                 self.project_open_requested.emit(pid)
@@ -725,9 +804,10 @@ class CommercialProjectsPage(QWidget):
             bundle_layout.addWidget(button)
 
             if self.workspace_mode == "commercial":
-                landing_button = QPushButton("🚀  Ma Landing Page")
+                landing_button = QPushButton("🚀  ACCÉDER À MA LANDING PAGE")
                 landing_button.setObjectName("ProjectLandingAction")
                 landing_button.setCursor(Qt.PointingHandCursor)
+                landing_button.setFixedHeight(42)
                 landing_button.clicked.connect(
                     lambda _checked=False, pid=project_id:
                     self._show_landing(pid)
@@ -736,8 +816,13 @@ class CommercialProjectsPage(QWidget):
                 bundle_layout.addWidget(landing_button)
 
             self._choice_bundles.append(bundle)
-            self.choice_grid.addWidget(bundle, row, col)
+            self.choice_grid.addWidget(bundle, row, col, Qt.AlignTop)
             col += 1
             if col >= 2:
                 col = 0
                 row += 1
+
+        self._sync_choice_area_height(
+            len(projects),
+            has_actions=self.workspace_mode == "commercial",
+        )
