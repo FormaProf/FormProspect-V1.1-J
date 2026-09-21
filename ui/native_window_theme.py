@@ -208,4 +208,3 @@ def apply_qt_window_chrome(window, mode: str) -> None:
                 border:none;
             }}
         """)
-
