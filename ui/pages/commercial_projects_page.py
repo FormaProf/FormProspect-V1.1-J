@@ -51,13 +51,12 @@ class CommercialProjectsPage(QWidget):
         self._landing_project_id = ""
         self._current_landing = None
         self._theme_mode = projects_theme_mode()
-        self._classic_mode = self._theme_mode == THEME_CLASSIC
-        self._theme_sync_window = None
 
-        if self._classic_mode:
-            self._build_classic_ui()
-        else:
-            self._build_premium_ui()
+        # 8E unified UI: Classique / Clair / Sombre use the exact same
+        # premium workspace. Only the palette is allowed to change.
+        self._classic_mode = False
+        self._theme_sync_window = None
+        self._build_premium_ui()
 
         if auto_refresh:
             self.rafraichir()
@@ -186,7 +185,7 @@ class CommercialProjectsPage(QWidget):
         nav_title = QLabel("Accès aux projets")
         nav_title.setObjectName("PanelTitle")
         nav_hint = QLabel(
-            "Sélectionnez une carte pour entrer dans le CRM du projet."
+            "Ouvrez le CRM du projet ou utilisez directement sa Landing Page personnelle."
         )
         nav_hint.setObjectName("PanelHint")
         nav_title_box.addWidget(nav_title)
@@ -258,10 +257,6 @@ class CommercialProjectsPage(QWidget):
     def _apply_visual_theme(self):
         mode = projects_theme_mode()
         if mode == self._theme_mode:
-            return
-        if mode == THEME_CLASSIC or self._classic_mode:
-            # Classique conserve son layout historique. Les deux thèmes UI 2.0
-            # peuvent basculer immédiatement sans reconstruire la page.
             return
         self._theme_mode = mode
         self.setStyleSheet(projects_stylesheet(mode))
@@ -601,7 +596,7 @@ class CommercialProjectsPage(QWidget):
                     getattr(projects[0], "id", "") or ""
                 ).strip()
                 if project_id:
-                    landing_button = QPushButton("↗ Ma Landing Page")
+                    landing_button = QPushButton("🚀  Ma Landing Page")
                     landing_button.setObjectName("ProjectLandingAction")
                     landing_button.setCursor(Qt.PointingHandCursor)
                     landing_button.clicked.connect(
@@ -609,9 +604,7 @@ class CommercialProjectsPage(QWidget):
                         self._show_landing(pid)
                     )
                     self.landing_buttons[project_id] = landing_button
-                    bundle_layout.addWidget(
-                        landing_button, 0, Qt.AlignLeft
-                    )
+                    bundle_layout.addWidget(landing_button)
 
             self._choice_bundles.append(bundle)
             self.choice_grid.addWidget(bundle, row, col)
@@ -732,7 +725,7 @@ class CommercialProjectsPage(QWidget):
             bundle_layout.addWidget(button)
 
             if self.workspace_mode == "commercial":
-                landing_button = QPushButton("↗ Ma Landing Page")
+                landing_button = QPushButton("🚀  Ma Landing Page")
                 landing_button.setObjectName("ProjectLandingAction")
                 landing_button.setCursor(Qt.PointingHandCursor)
                 landing_button.clicked.connect(
@@ -740,7 +733,7 @@ class CommercialProjectsPage(QWidget):
                     self._show_landing(pid)
                 )
                 self.landing_buttons[project_id] = landing_button
-                bundle_layout.addWidget(landing_button, 0, Qt.AlignLeft)
+                bundle_layout.addWidget(landing_button)
 
             self._choice_bundles.append(bundle)
             self.choice_grid.addWidget(bundle, row, col)

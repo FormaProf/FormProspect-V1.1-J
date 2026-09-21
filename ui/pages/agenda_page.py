@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from time import monotonic
+import threading
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -38,6 +40,9 @@ from ui.dialogs.prospect_dialog import ProspectDialog
 class AgendaPage(QWidget):
     """Agenda commercial relié aux prochaines actions des prospects."""
 
+    cloud_refresh_ready = Signal()
+    cloud_refresh_failed = Signal(str)
+
     HEADERS = ["Heure", "Entreprise", "Action", "Priorité", "Score", "Commercial", "Contact"]
 
     def __init__(self):
@@ -46,9 +51,19 @@ class AgendaPage(QWidget):
         self.selected_actions: list[dict] = []
         self._cloud_actions: list[dict] = []
         self._owner_names: dict[str, str] = {}
-        self.setStyleSheet(f"background-color: {BACKGROUND_COLOR}; font-family: '{FONT}';")
+        self._loaded_once = False
+        self._last_refresh_monotonic = 0.0
+        self._cache_ttl_seconds = 300.0
+        self._cloud_refresh_running = False
+        self._cloud_refresh_thread = None
+
+        self.setStyleSheet(
+            f"background-color: {BACKGROUND_COLOR}; font-family: '{FONT}';"
+        )
         self._build_ui()
-        self.rafraichir()
+
+        self.cloud_refresh_ready.connect(self._on_cloud_refresh_ready)
+        self.cloud_refresh_failed.connect(self._on_cloud_refresh_failed)
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
@@ -495,8 +510,9 @@ class AgendaPage(QWidget):
 
         return parsed
 
-    def _load_owner_names(self) -> None:
-        self._owner_names = {}
+    def _load_owner_names(self, *, force: bool = False) -> None:
+        if self._owner_names and not force:
+            return
 
         try:
             payload = (
@@ -506,6 +522,7 @@ class AgendaPage(QWidget):
         except Exception:
             return
 
+        owner_names: dict[str, str] = {}
         for owner in payload.get("owners", []):
             owner_id = str(
                 owner.get("id") or ""
@@ -522,7 +539,9 @@ class AgendaPage(QWidget):
                 or str(owner.get("email") or "").strip()
                 or owner_id
             )
-            self._owner_names[owner_id] = label
+            owner_names[owner_id] = label
+
+        self._owner_names = owner_names
 
     def _load_cloud_actions(self) -> None:
         """
@@ -632,6 +651,84 @@ class AgendaPage(QWidget):
             "total": len(dates),
         }
 
+    def _cache_is_fresh(self) -> bool:
+        if not self._loaded_once:
+            return False
+        return (
+            monotonic() - self._last_refresh_monotonic
+            < self._cache_ttl_seconds
+        )
+
+    def _mark_refresh_complete(self) -> None:
+        self._loaded_once = True
+        self._last_refresh_monotonic = monotonic()
+
+    def ensure_loaded(self, *, force: bool = False) -> None:
+        """Open instantly and refresh only when the cached agenda is stale."""
+        if not force and self._cache_is_fresh():
+            self.refresh_calendar_marks()
+            self.load_selected_day()
+            return
+        self.rafraichir(force=force)
+
+    def _start_cloud_refresh(self) -> None:
+        if self._cloud_refresh_running:
+            return
+
+        self._cloud_refresh_running = True
+        self.subtitle.setText("Synchronisation de l'agenda Cloud…")
+
+        worker = threading.Thread(
+            target=self._cloud_refresh_worker,
+            name="FormProspectAgendaCloudRefresh",
+            daemon=True,
+        )
+        self._cloud_refresh_thread = worker
+        worker.start()
+
+    def _cloud_refresh_worker(self) -> None:
+        try:
+            self._load_cloud_actions()
+        except Exception as exc:
+            self.cloud_refresh_failed.emit(str(exc))
+            return
+        self.cloud_refresh_ready.emit()
+
+    def _on_cloud_refresh_ready(self) -> None:
+        self._cloud_refresh_running = False
+
+        user = SessionState.user()
+        organization_name = str(
+            getattr(
+                user,
+                "organization_name",
+                "",
+            )
+            or "Form@Prospect Cloud"
+        )
+
+        self.subtitle.setText(
+            f"Espace Cloud : {organization_name}"
+        )
+
+        summary = self._cloud_summary()
+        for key, card in self.summary_cards.items():
+            card.set_value(summary.get(key, 0))
+
+        self.refresh_calendar_marks()
+        self.load_selected_day()
+        self._mark_refresh_complete()
+
+    def _on_cloud_refresh_failed(self, message: str) -> None:
+        self._cloud_refresh_running = False
+        self.subtitle.setText("Synchronisation Cloud impossible")
+        QMessageBox.critical(
+            self,
+            "Agenda Cloud",
+            "Impossible de charger l'agenda Cloud :\n"
+            f"{message}",
+        )
+
     def go_today(self):
         self.calendar.setSelectedDate(
             QDate.currentDate()
@@ -639,47 +736,17 @@ class AgendaPage(QWidget):
         self.calendar.showToday()
         self.load_selected_day()
 
-    def rafraichir(self):
+    def rafraichir(self, *_args, force: bool = True):
+        # Normal navigation does not hit the network while the cache is fresh.
+        if not force and self._cache_is_fresh():
+            self.refresh_calendar_marks()
+            self.load_selected_day()
+            return
+
         if self._is_cloud():
-            try:
-                self._load_cloud_actions()
-
-                user = SessionState.user()
-                organization_name = str(
-                    getattr(
-                        user,
-                        "organization_name",
-                        "",
-                    )
-                    or "Form@Prospect Cloud"
-                )
-
-                self.subtitle.setText(
-                    f"Espace Cloud : {organization_name}"
-                )
-
-                summary = self._cloud_summary()
-
-                for key, card in (
-                    self.summary_cards.items()
-                ):
-                    card.set_value(
-                        summary.get(key, 0)
-                    )
-
-                self.refresh_calendar_marks()
-                self.load_selected_day()
-
-            except Exception as exc:
-                QMessageBox.critical(
-                    self,
-                    "Agenda Cloud",
-                    (
-                        "Impossible de charger "
-                        f"l'agenda Cloud :\n{exc}"
-                    ),
-                )
-
+            # owners + paginated prospects are network calls. They run outside
+            # the Qt UI thread so opening Agenda remains immediate.
+            self._start_cloud_refresh()
             return
 
         project = self._project()
@@ -695,6 +762,7 @@ class AgendaPage(QWidget):
 
             self.table.setRowCount(0)
             self.day_count.setText("0 action")
+            self._mark_refresh_complete()
             return
 
         self.subtitle.setText(
@@ -711,6 +779,7 @@ class AgendaPage(QWidget):
 
         self.refresh_calendar_marks()
         self.load_selected_day()
+        self._mark_refresh_complete()
 
     def refresh_calendar_marks(self, *_args):
         project = self._project()

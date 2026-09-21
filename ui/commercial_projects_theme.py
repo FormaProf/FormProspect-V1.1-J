@@ -84,7 +84,9 @@ def projects_palette(mode: str | None = None) -> dict[str, str]:
 
 
 def premium_projects_enabled(mode: str | None = None) -> bool:
-    return normalize_theme_mode(mode or projects_theme_mode()) != THEME_CLASSIC
+    # 8E unified UI: all appearance modes share the same premium layout.
+    # The selected theme changes only the palette, never the page structure.
+    return True
 
 
 def add_soft_shadow(widget: QWidget, *, dark: bool = False, blur: int = 24, y: int = 5) -> None:
@@ -99,9 +101,6 @@ def projects_stylesheet(mode: str | None = None) -> str:
     mode = normalize_theme_mode(mode or projects_theme_mode())
     p = projects_palette(mode)
     dark = mode == THEME_UI_DARK
-    if mode == THEME_CLASSIC:
-        return ""
-
     hero_start = "#08192B" if dark else "#F8FCFF"
     hero_end = "#0D2240" if dark else "#EAF5FF"
     selected = "#123B61" if dark else "#E6F3FF"
@@ -244,18 +243,21 @@ def projects_stylesheet(mode: str | None = None) -> str:
             background:{selected};
         }}
         QPushButton#ProjectLandingAction {{
-            min-height:31px;
-            color:{p['cyan']};
-            background:{p['surface_alt']};
-            border:1px solid {p['border']};
-            border-radius:9px;
-            padding:0 11px;
-            font-size:10px;
+            min-height:38px;
+            color:#FFFFFF;
+            background:qlineargradient(
+                x1:0, y1:0, x2:1, y2:0,
+                stop:0 #168FD8,
+                stop:1 #5D67F2
+            );
+            border:1px solid #62AEF2;
+            border-radius:10px;
+            padding:0 13px;
+            font-size:11px;
             font-weight:900;
         }}
         QPushButton#ProjectLandingAction:hover {{
-            border-color:{p['cyan']};
-            background:{hover};
+            border-color:#A8DFFF;
         }}
 
         QLineEdit {{
@@ -341,8 +343,6 @@ def projects_stylesheet(mode: str | None = None) -> str:
 
 def apply_project_dialog_theme(dialog: QWidget, mode: str | None = None) -> None:
     mode = normalize_theme_mode(mode or projects_theme_mode())
-    if mode == THEME_CLASSIC:
-        return
     p = projects_palette(mode)
     dialog.setStyleSheet(
         projects_stylesheet(mode)

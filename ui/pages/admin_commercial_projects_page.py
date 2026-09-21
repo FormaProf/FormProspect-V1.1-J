@@ -139,7 +139,10 @@ class AdminCommercialProjectsPage(QWidget):
         self.snapshot = None
         self.parents = ()
         self._theme_mode = projects_theme_mode()
-        self._classic_mode = self._theme_mode == THEME_CLASSIC
+
+        # 8E unified UI: the progressive premium hierarchy is the only
+        # structural layout. Themes now change palette only.
+        self._classic_mode = False
         self._project_view_filtered = False
         self._visible_projects = ()
         self._premium_parent_revealed = False
@@ -656,10 +659,6 @@ class AdminCommercialProjectsPage(QWidget):
     def _apply_visual_theme(self):
         mode = projects_theme_mode()
         if mode == self._theme_mode:
-            return
-        if mode == THEME_CLASSIC or self._classic_mode:
-            # Classique conserve son layout historique. Les deux thèmes UI 2.0
-            # peuvent basculer immédiatement sans reconstruire la page.
             return
         self._theme_mode = mode
         self.setStyleSheet(projects_stylesheet(mode))

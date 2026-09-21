@@ -502,96 +502,20 @@ class MainWindow(QMainWindow):
         self.ouvrir_projets_commerciaux()
 
     def _sync_commercial_project_theme_pages(self):
-        # Classique <-> UI 2.0 exige une reconstruction du layout.
-        # Clair <-> Sombre conserve la meme page et ne change que le QSS.
-        from core.theme_settings import THEME_CLASSIC, get_theme_preference
+        """Apply the palette in place; never rebuild project pages.
 
-        wants_classic = get_theme_preference() == THEME_CLASSIC
-
-        def has_theme_contract(page):
-            return page is not None and hasattr(page, "_classic_mode")
-
-        def needs_rebuild(page):
-            return (
-                has_theme_contract(page)
-                and bool(getattr(page, "_classic_mode", False)) != wants_classic
-            )
-
-        def swap_page(old_page, new_page):
-            pages = getattr(self, "pages", None)
-            if pages is None:
-                return False
-
-            was_current = pages.currentWidget() is old_page
-            index = pages.indexOf(old_page)
-
-            if index >= 0:
-                pages.insertWidget(index, new_page)
-                pages.removeWidget(old_page)
-            else:
-                pages.addWidget(new_page)
-
-            if was_current:
-                new_page.rafraichir()
-                pages.setCurrentWidget(new_page)
-
-            old_page.deleteLater()
-            return was_current
-
-        admin_page = getattr(self, "admin_commercial_projects_page", None)
-        if has_theme_contract(admin_page):
-            if needs_rebuild(admin_page):
-                service = getattr(
-                    admin_page,
-                    "service",
-                    getattr(self, "admin_commercial_project_service", None),
-                )
-                if service is not None:
-                    replacement = AdminCommercialProjectsPage(
-                        service=service,
-                        auto_refresh=False,
-                    )
-                    swap_page(admin_page, replacement)
-                    self.admin_commercial_projects_page = replacement
-            else:
-                apply_theme = getattr(admin_page, "_apply_visual_theme", None)
-                if callable(apply_theme):
-                    apply_theme()
-
-        commercial_page = getattr(self, "commercial_projects_page", None)
-        if has_theme_contract(commercial_page):
-            if needs_rebuild(commercial_page):
-                service = getattr(
-                    commercial_page,
-                    "service",
-                    getattr(self, "commercial_project_workspace_service", None),
-                )
-                if service is not None:
-                    replacement = CommercialProjectsPage(
-                        service=service,
-                        user_id=str(
-                            getattr(
-                                commercial_page,
-                                "user_id",
-                                getattr(self, "commercial_user_id", ""),
-                            )
-                            or ""
-                        ).strip(),
-                        workspace_mode=str(
-                            getattr(commercial_page, "workspace_mode", "commercial")
-                            or "commercial"
-                        ),
-                        auto_refresh=False,
-                    )
-                    replacement.project_open_requested.connect(
-                        self._ouvrir_projet_commercial_enfant
-                    )
-                    swap_page(commercial_page, replacement)
-                    self.commercial_projects_page = replacement
-            else:
-                apply_theme = getattr(commercial_page, "_apply_visual_theme", None)
-                if callable(apply_theme):
-                    apply_theme()
+        Classique, UI Clair and UI Sombre share one structural UI. Rebuilding
+        widgets on a theme change caused visual regressions and avoidable
+        refresh/network work.
+        """
+        for attribute in (
+            "admin_commercial_projects_page",
+            "commercial_projects_page",
+        ):
+            page = getattr(self, attribute, None)
+            apply_theme = getattr(page, "_apply_visual_theme", None)
+            if callable(apply_theme):
+                apply_theme()
 
     def ouvrir_admin_projets_commerciaux(self):
         if not SessionState.has_role("Administrateur"):
@@ -645,9 +569,16 @@ class MainWindow(QMainWindow):
     def ouvrir_agenda(self):
         if self._refuser_espace_commercial_au_formateur():
             return
-        self.agenda_page.rafraichir()
+
+        # Show the page first. AgendaPage refreshes Cloud data in background and
+        # reuses its cache, so navigation never waits on network pagination.
         self.mettre_a_jour_barre_statut()
         self.pages.setCurrentWidget(self.agenda_page)
+        ensure_loaded = getattr(self.agenda_page, "ensure_loaded", None)
+        if callable(ensure_loaded):
+            ensure_loaded()
+        else:
+            self.agenda_page.rafraichir()
 
     def ouvrir_campagnes(self):
         if self._refuser_espace_commercial_au_formateur():
