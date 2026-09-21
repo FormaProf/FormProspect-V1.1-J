@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -59,7 +60,50 @@ class CommercialAccountPage(QWidget):
         self.setObjectName("CommercialAccountPage")
         self.setStyleSheet(self._style())
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("AccountScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(
+            f"""
+            QScrollArea#AccountScrollArea {{
+                border: none;
+                background: {PAGE_BG};
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 11px;
+                margin: 6px 2px 6px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {BORDER};
+                min-height: 42px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {PRIMARY};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: transparent;
+            }}
+            """
+        )
+
+        content = QWidget()
+        content.setObjectName("CommercialAccountContent")
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(42, 28, 42, 30)
         root.setSpacing(16)
 
@@ -73,7 +117,9 @@ class CommercialAccountPage(QWidget):
         root.addWidget(subtitle)
         root.addSpacing(5)
 
-        root.addWidget(self._build_profile_card(), 1)
+        self.profile_card = self._build_profile_card()
+        self.profile_card.setMinimumHeight(365)
+        root.addWidget(self.profile_card)
 
         self.organization_card = self._build_commercial_organization_card()
         self.organization_card.setVisible(False)
@@ -82,6 +128,9 @@ class CommercialAccountPage(QWidget):
         root.addWidget(self._build_security_card())
         root.addWidget(self._build_license_card())
         root.addStretch(1)
+
+        self.scroll_area.setWidget(content)
+        outer.addWidget(self.scroll_area)
 
         self.rafraichir()
 
