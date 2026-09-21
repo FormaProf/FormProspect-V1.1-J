@@ -728,8 +728,23 @@ class ProspectDialog(QDialog):
         )
 
         self.pipeline_input = QComboBox()
-        self.pipeline_input.addItems(PIPELINE)
-        self.pipeline_input.currentTextChanged.connect(self._refresh_header_badge)
+        from PySide6.QtGui import QColor, QIcon, QPixmap
+
+        for pipeline_value in PIPELINE:
+            canonical = str(pipeline_value)
+            if "nouveau" in canonical.lower():
+                marker = QPixmap(9, 9)
+                marker.fill(QColor("#338CE4"))
+                self.pipeline_input.addItem(QIcon(marker), "Nouveau", canonical)
+            else:
+                self.pipeline_input.addItem(canonical, canonical)
+
+        self.pipeline_input.currentIndexChanged.connect(
+            lambda _index: self._refresh_header_badge(
+                self.pipeline_input.currentData()
+                or self.pipeline_input.currentText()
+            )
+        )
 
         self.priorite_input = QComboBox()
         self.priorite_input.addItems(PRIORITES)
@@ -1282,7 +1297,10 @@ class ProspectDialog(QDialog):
         self.cancel_button.setStyleSheet(styles["secondary"])
         self.bouton_ajouter_note.setStyleSheet(styles["secondary"])
         self.bouton_enregistrer.setStyleSheet(styles["primary"])
-        self._refresh_header_badge(self.pipeline_input.currentText())
+        self._refresh_header_badge(
+            self.pipeline_input.currentData()
+            or self.pipeline_input.currentText()
+        )
 
     def _refresh_header_badge(self, pipeline_text):
         text = str(pipeline_text or "")
@@ -1292,7 +1310,7 @@ class ProspectDialog(QDialog):
 
         if classic:
             labels = {
-                "nouveau": ("NOUVEAU", "#ECFDF3", "#166534", "#BBF7D0"),
+                "nouveau": ("NOUVEAU", "#EAF4FF", "#0B5FC6", "#338CE4"),
                 "qualification": ("QUALIFICATION", "#FFFBEB", "#854D0E", "#FDE68A"),
                 "rdv": ("RDV PROGRAMMÉ", "#EFF8FF", "#075985", "#BAE6FD"),
                 "proposition": ("PROPOSITION", "#FAF5FF", "#6B21A8", "#E9D5FF"),
@@ -1344,9 +1362,9 @@ class ProspectDialog(QDialog):
             )
         elif "nouveau" in lowered:
             values = (
-                ("NOUVEAU", "#0E2A24", "#70E2B1", "#276B56")
+                ("NOUVEAU", "#0B2742", "#8FD6FF", "#338CE4")
                 if dark else
-                ("NOUVEAU", "#EAF9F3", "#147353", "#A9DDCB")
+                ("NOUVEAU", "#EAF4FF", "#0B5FC6", "#338CE4")
             )
         else:
             values = (
@@ -1507,7 +1525,16 @@ class ProspectDialog(QDialog):
         self.social_other_urls_input.setPlainText(
             str(social_other_urls or "")
         )
-        self.pipeline_input.setCurrentText(pipeline_final)
+        pipeline_index = self.pipeline_input.findData(pipeline_final)
+        if pipeline_index < 0:
+            pipeline_index = self.pipeline_input.findText(pipeline_final)
+        if pipeline_index < 0 and "nouveau" in str(pipeline_final).lower():
+            for index in range(self.pipeline_input.count()):
+                if "nouveau" in str(self.pipeline_input.itemData(index) or "").lower():
+                    pipeline_index = index
+                    break
+        if pipeline_index >= 0:
+            self.pipeline_input.setCurrentIndex(pipeline_index)
         self.priorite_input.setCurrentText(priorite_finale)
         self.prochaine_action_input.setCurrentText(action_finale)
 
@@ -1672,7 +1699,10 @@ class ProspectDialog(QDialog):
 
     def enregistrer(self):
         try:
-            nouveau_pipeline = self.pipeline_input.currentText()
+            nouveau_pipeline = (
+                self.pipeline_input.currentData()
+                or self.pipeline_input.currentText()
+            )
             nouvelle_priorite = self.priorite_input.currentText()
             nouvelle_action = self.prochaine_action_input.currentText()
 

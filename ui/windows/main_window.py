@@ -509,6 +509,7 @@ class MainWindow(QMainWindow):
         refresh/network work.
         """
         for attribute in (
+            "dashboard_page",
             "admin_commercial_projects_page",
             "commercial_projects_page",
         ):

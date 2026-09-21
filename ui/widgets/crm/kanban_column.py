@@ -379,14 +379,17 @@ class KanbanColumn(QFrame):
         if "contacter" in name or "qualification" in name:
             return "#F6D44A"
         if "nouveau" in name:
-            return "#62D6FF"
+            return "#338CE4"
         return "#6AAEF5"
 
     def _update_header(self):
-        couleur = PIPELINE_COLORS.get(
-            self.pipeline_name,
-            "#F8FAFC",
-        )
+        if "nouveau" in str(self.pipeline_name).lower():
+            couleur = "#338CE4"
+        else:
+            couleur = PIPELINE_COLORS.get(
+                self.pipeline_name,
+                "#F8FAFC",
+            )
 
         labels = {
             "🟢 Nouveau": "NOUVEAU",

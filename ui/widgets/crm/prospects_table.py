@@ -37,7 +37,7 @@ class PremiumCRMDelegate(QStyledItemDelegate):
     """Rendu premium : cellules aérées et badges arrondis."""
 
     PIPELINE_BADGES = {
-        "🟢 Nouveau": ("Nouveau", "#ECFDF3", "#166534", "#BBF7D0"),
+        "🟢 Nouveau": ("Nouveau", "#EAF4FF", "#0B5FC6", "#338CE4"),
         "🟡 À contacter": ("À contacter", "#FFFBEB", "#854D0E", "#FDE68A"),
         "🔥 Lead chaud": ("Lead chaud", "#FFF7ED", "#9A3412", "#FDBA74"),
         "🔵 Contacté": ("Contacté", "#EFF6FF", "#1D4ED8", "#BFDBFE"),

@@ -25,6 +25,7 @@ from core.application_state import ApplicationState
 from core.constants import PRIMARY_COLOR
 from core.crm import PIPELINE, PIPELINE_COLORS
 from core.session import SessionState
+from core.theme_settings import get_theme_preference
 from core.theme import BACKGROUND_COLOR, BORDER_COLOR, TEXT_PRIMARY, TEXT_SECONDARY
 from services.backup_service import BackupService
 from services.dashboard_service import DashboardService
@@ -42,6 +43,7 @@ from ui.dialogs.cloud_deployment_dialog import (
 )
 from ui.dialogs.project_archive_dialog import ProjectArchiveDialog
 from ui.widgets.dashboard_charts import HorizontalBarChart, QualityDonut
+from ui.dashboard_premium_theme import dashboard_palette, dashboard_stylesheet
 
 
 class DashboardPage(QWidget):
@@ -67,36 +69,40 @@ class DashboardPage(QWidget):
         self.kpi_values: dict[str, QLabel] = {}
         self.pipeline_values: dict[str, QLabel] = {}
         self.action_values: dict[str, QLabel] = {}
+        self._theme_mode = get_theme_preference()
+        self._status_kind = "ready"
+        self._last_activity_events = []
+        self._pipeline_frames: list[tuple[QFrame, str]] = []
         self._build_ui()
         self.rafraichir()
 
     def _build_ui(self):
         main = QVBoxLayout(self)
         main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(
-            "QScrollArea { background: #F8FAFD; border: none; }"
-            "QScrollBar:vertical { background: transparent; width: 10px; margin: 4px 2px 4px 2px; }"
-            "QScrollBar::handle:vertical { background: #CBD5E1; border-radius: 5px; min-height: 36px; }"
-            "QScrollBar::handle:vertical:hover { background: #94A3B8; }"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-        )
+        self.dashboard_scroll = QScrollArea()
+        self.dashboard_scroll.setObjectName("DashboardScroll")
+        self.dashboard_scroll.setWidgetResizable(True)
+        self.dashboard_scroll.setFrameShape(QFrame.NoFrame)
+        self.dashboard_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        content = QWidget()
-        content.setStyleSheet("background: #F8FAFD;")
-        root = QVBoxLayout(content)
-        root.setContentsMargins(34, 30, 34, 42)
-        root.setSpacing(18)
+        self.dashboard_content = QWidget()
+        self.dashboard_content.setObjectName("DashboardContent")
+        root = QVBoxLayout(self.dashboard_content)
+        root.setContentsMargins(28, 22, 28, 30)
+        root.setSpacing(12)
 
+        # 1) Contexte et commandes.
         root.addWidget(self._build_header())
 
+        # 2) La citation reste volontairement en haut du cockpit.
+        root.addWidget(self._build_quote_card())
+
+        # 3) Les six indicateurs essentiels tiennent sur une seule ligne.
         kpi_grid = QGridLayout()
-        kpi_grid.setHorizontalSpacing(14)
-        kpi_grid.setVerticalSpacing(14)
+        kpi_grid.setHorizontalSpacing(10)
+        kpi_grid.setVerticalSpacing(10)
         kpis = [
             ("prospects", "Prospects", "👥", "Base active"),
             ("telephones", "Téléphones", "📞", "Contacts joignables"),
@@ -112,9 +118,9 @@ class DashboardPage(QWidget):
                 ),
                 "€",
                 (
-                    "Commissions générées — année en cours"
+                    "Commissions générées"
                     if self._is_commercial()
-                    else "Ventes signées — année en cours"
+                    else "Ventes signées"
                 ),
             ),
         ]
@@ -125,140 +131,143 @@ class DashboardPage(QWidget):
             kpi_grid.setColumnStretch(column, 1)
         root.addLayout(kpi_grid)
 
-        root.addWidget(self._build_quote_card())
+        # 4) Le coeur opérationnel est visible sans parcourir une longue page.
+        command_grid = QGridLayout()
+        command_grid.setHorizontalSpacing(12)
+        command_grid.setVerticalSpacing(12)
+        command_grid.setColumnStretch(0, 3)
+        command_grid.setColumnStretch(1, 2)
+        command_grid.addWidget(self._build_pipeline_card(), 0, 0)
+        command_grid.addWidget(self._build_actions_card(), 0, 1)
+        root.addLayout(command_grid)
 
-        insight_grid = QGridLayout()
-        insight_grid.setHorizontalSpacing(16)
-        insight_grid.setVerticalSpacing(16)
-        insight_grid.setColumnStretch(0, 3)
-        insight_grid.setColumnStretch(1, 2)
+        # 5) Santé de la base : contact, qualité et progression sur une ligne.
+        health_grid = QGridLayout()
+        health_grid.setHorizontalSpacing(12)
+        health_grid.setVerticalSpacing(12)
+        health_grid.setColumnStretch(0, 2)
+        health_grid.setColumnStretch(1, 1)
+        health_grid.setColumnStretch(2, 1)
 
         contact_card = self._section(
             "Données de contact",
-            "Vision instantanée de la richesse de votre base commerciale.",
+            "Richesse exploitable de votre base.",
             "BASE COMMERCIALE",
         )
         self.contact_chart = HorizontalBarChart()
-        self.contact_chart.setMaximumHeight(160)
+        self.contact_chart.setMaximumHeight(150)
+        self.contact_chart.setMinimumHeight(132)
         self.contact_empty = QLabel("Aucune donnée à afficher pour le moment.")
+        self.contact_empty.setObjectName("DashboardEmptyText")
         self.contact_empty.setAlignment(Qt.AlignCenter)
-        self.contact_empty.setStyleSheet(
-            "font-size:12px; color:#94A3B8; border:none; background:transparent; padding:24px;"
-        )
+        self.contact_empty.setFixedHeight(38)
         contact_card.layout().addWidget(self.contact_chart)
         contact_card.layout().addWidget(self.contact_empty)
-        insight_grid.addWidget(contact_card, 0, 0)
+        health_grid.addWidget(contact_card, 0, 0)
 
         quality_card = self._section(
-            "Score qualité",
-            "Complétude moyenne des informations de contact.",
-            "QUALITÉ",
+            "Qualité",
+            "Complétude des informations de contact.",
+            "QUALITÉ BASE",
         )
         self.quality_donut = QualityDonut()
-        self.quality_donut.setMaximumHeight(175)
+        self.quality_donut.setMaximumHeight(145)
+        self.quality_donut.setMinimumHeight(132)
         self.quality_details = QLabel("Aucun projet actif")
+        self.quality_details.setObjectName("DashboardBodyMuted")
         self.quality_details.setAlignment(Qt.AlignCenter)
         self.quality_details.setWordWrap(True)
-        self.quality_details.setStyleSheet(
-            "color:#6B7A90; font-size:12px; border:none; background:transparent;"
-        )
         quality_card.layout().addWidget(self.quality_donut)
         quality_card.layout().addWidget(self.quality_details)
-        insight_grid.addWidget(quality_card, 0, 1)
-        root.addLayout(insight_grid)
+        health_grid.addWidget(quality_card, 0, 1)
 
-        lower_grid = QGridLayout()
-        lower_grid.setHorizontalSpacing(16)
-        lower_grid.setVerticalSpacing(16)
-        lower_grid.setColumnStretch(0, 1)
-        lower_grid.setColumnStretch(1, 1)
+        health_grid.addWidget(self._build_enrichment_card(), 0, 2)
+        root.addLayout(health_grid)
 
-        lower_grid.addWidget(self._build_actions_card(), 0, 0)
-        lower_grid.addWidget(self._build_pipeline_card(), 0, 1)
-        lower_grid.addWidget(self._build_enrichment_card(), 1, 0)
-        lower_grid.addWidget(self._build_recent_activity_card(), 1, 1)
-        lower_grid.addWidget(self._build_scoring_card(), 2, 0, 1, 2)
-        root.addLayout(lower_grid)
-        root.addStretch()
+        # 6) Priorisation et historique ferment la page sans grand espace mort.
+        bottom_grid = QGridLayout()
+        bottom_grid.setHorizontalSpacing(12)
+        bottom_grid.setVerticalSpacing(12)
+        bottom_grid.setColumnStretch(0, 3)
+        bottom_grid.setColumnStretch(1, 2)
+        bottom_grid.addWidget(self._build_scoring_card(), 0, 0)
+        bottom_grid.addWidget(self._build_recent_activity_card(), 0, 1)
+        root.addLayout(bottom_grid)
 
-        scroll.setWidget(content)
-        main.addWidget(scroll)
+        self.dashboard_scroll.setWidget(self.dashboard_content)
+        main.addWidget(self.dashboard_scroll)
+        self._apply_visual_theme()
 
     def _build_header(self):
         frame = QFrame()
         frame.setObjectName("DashboardHero")
-        frame.setMinimumHeight(118)
-        frame.setStyleSheet("""
-            QFrame#DashboardHero {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #FFFFFF,
-                    stop:0.72 #F7FBFF,
-                    stop:1 #EAF4FF
-                );
-                border: 1px solid #E4EBF4;
-                border-radius: 22px;
-            }
-        """)
-        self._apply_shadow(frame, blur=34, y=8, alpha=24)
+        frame.setMinimumHeight(112)
+        self._apply_shadow(frame, blur=30, y=7, alpha=24)
 
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(24, 20, 22, 20)
-        layout.setSpacing(18)
+        layout.setContentsMargins(22, 17, 18, 17)
+        layout.setSpacing(16)
 
         texts = QVBoxLayout()
-        texts.setSpacing(4)
+        texts.setSpacing(3)
 
-        eyebrow = QLabel("FORM@PROSPECT  •  CENTRE DE COMMANDEMENT")
-        eyebrow.setStyleSheet(
-            "font-size:10px; font-weight:900; letter-spacing:1.2px; "
-            "color:#338CE4; border:none; background:transparent;"
-        )
+        eyebrow = QLabel("FORM@PROSPECT  •  PILOTAGE COMMERCIAL")
+        eyebrow.setObjectName("DashboardEyebrow")
 
         self.title = QLabel("Bonjour 👋")
-        self.title.setStyleSheet(
-            "font-size:30px; font-weight:900; color:#0B1220; "
-            "border:none; background:transparent;"
+        self.title.setObjectName("DashboardTitle")
+
+        self.subtitle = QLabel(
+            "Ouvrez un projet pour afficher votre centre de commandement."
         )
-        self.subtitle = QLabel("Ouvrez un projet pour afficher votre centre de commandement.")
-        self.subtitle.setStyleSheet(
-            "font-size:13px; color:#6B7A90; border:none; background:transparent;"
-        )
+        self.subtitle.setObjectName("DashboardSubtitle")
+
         self.hero_status = QLabel("●  Prêt à prospecter")
-        self.hero_status.setStyleSheet(
-            "font-size:10px; font-weight:800; color:#16A34A; border:none; background:transparent;"
-        )
+        self.hero_status.setObjectName("DashboardStatus")
 
         texts.addWidget(eyebrow)
         texts.addWidget(self.title)
         texts.addWidget(self.subtitle)
         texts.addWidget(self.hero_status)
 
+        context = QFrame()
+        context.setObjectName("DashboardContext")
+        context_layout = QVBoxLayout(context)
+        context_layout.setContentsMargins(13, 10, 13, 10)
+        context_layout.setSpacing(2)
+
+        context_label = QLabel("ESPACE ACTIF")
+        context_label.setObjectName("DashboardContextLabel")
+        self.context_project_value = QLabel("Aucun projet actif")
+        self.context_project_value.setObjectName("DashboardContextValue")
+        self.context_project_value.setWordWrap(True)
+        self.context_source_value = QLabel("Aucune source")
+        self.context_source_value.setObjectName("DashboardContextSource")
+        context_layout.addWidget(context_label)
+        context_layout.addWidget(self.context_project_value)
+        context_layout.addWidget(self.context_source_value)
+
         actions = QHBoxLayout()
-        actions.setSpacing(8)
+        actions.setSpacing(7)
         self.new_project_button = None
         self.open_project_button = None
         self.deploy_button = None
         self.archive_button = None
+        self._header_buttons = []
 
         buttons = (
-            ("＋ Nouveau projet", self.ouvrir_nouveau_projet),
-            ("📂  Ouvrir", self.ouvrir_projet_existant),
-            ("💾  Sauvegarder", self.sauvegarder_projet),
-            ("☁  Déployer", self.deploy_project),
-            ("📦  Archives", self.ouvrir_archives_projets),
-            ("↻  Rafraîchir", self.rafraichir),
+            ("＋ Nouveau", self.ouvrir_nouveau_projet),
+            ("📂 Ouvrir", self.ouvrir_projet_existant),
+            ("💾 Sauver", self.sauvegarder_projet),
+            ("☁ Déployer", self.deploy_project),
+            ("📦 Archives", self.ouvrir_archives_projets),
+            ("↻", self.rafraichir),
         )
         for index, (label, slot) in enumerate(buttons):
             button = QPushButton(label)
-            button.setFixedHeight(42)
-            button.setStyleSheet(
-                self._button_style()
-                if index in (0, 3)
-                else self._secondary_header_button_style()
-            )
+            button.setFixedHeight(38)
             button.clicked.connect(slot)
-            if "Nouveau projet" in label:
+            if "Nouveau" in label:
                 self.new_project_button = button
             elif "Ouvrir" in label:
                 self.open_project_button = button
@@ -266,74 +275,93 @@ class DashboardPage(QWidget):
                 self.deploy_button = button
             elif "Archives" in label:
                 self.archive_button = button
+            button.setProperty(
+                "dashboardButtonKind",
+                "primary" if index in (0, 3) else "secondary",
+            )
+            button.setStyleSheet(
+                self._button_style()
+                if index in (0, 3)
+                else self._secondary_header_button_style()
+            )
+            self._header_buttons.append(button)
             actions.addWidget(button)
 
         self._apply_role_permissions()
 
+        right = QVBoxLayout()
+        right.setSpacing(8)
+        right.addWidget(context)
+        right.addLayout(actions)
+
         layout.addLayout(texts, 1)
-        layout.addLayout(actions)
+        layout.addLayout(right)
         return frame
 
-    @staticmethod
-    def _button_style():
-        return """
-            QPushButton {
-                background: #338CE4;
-                color: white;
-                border: none;
-                border-radius: 12px;
-                padding: 0 16px;
-                font-size: 12px;
-                font-weight: 800;
-            }
-            QPushButton:hover { background: #247BD0; }
-            QPushButton:pressed { background: #1D66B2; }
-            QPushButton:disabled {
-                background: #E5EAF0;
-                color: #9AA7B8;
-            }
-        """
-
-    @staticmethod
-    def _secondary_header_button_style():
-        return """
-            QPushButton {
-                background: rgba(255,255,255,0.94);
-                color: #23344D;
-                border: 1px solid #DDE6F0;
-                border-radius: 12px;
-                padding: 0 14px;
-                font-size: 12px;
-                font-weight: 800;
-            }
-            QPushButton:hover {
-                background: #FFFFFF;
-                color: #338CE4;
-                border-color: #AFCFF0;
-            }
-            QPushButton:disabled {
-                background: #F2F5F8;
-                color: #A4AFBD;
-                border-color: #E7ECF2;
-            }
-        """
-
-    @staticmethod
-    def _deployed_button_style():
-        return """
-            QPushButton {
-                background: #16A34A;
-                color: white;
-                border: none;
+    def _button_style(self):
+        p = dashboard_palette(self._theme_mode)
+        return f"""
+            QPushButton {{
+                background: {p['primary']};
+                color: #FFFFFF;
+                border: 1px solid {p['primary']};
                 border-radius: 10px;
-                padding: 0 14px;
-                font-size: 13px;
-                font-weight: 700;
-            }
-            QPushButton:disabled {
-                background: #16A34A;
+                padding: 0 13px;
+                font-size: 11px;
+                font-weight: 800;
+            }}
+            QPushButton:hover {{
+                background: {p['primary_hover']};
+                border-color: {p['primary_hover']};
+            }}
+            QPushButton:pressed {{ background: {p['primary_pressed']}; }}
+            QPushButton:disabled {{
+                background: {p['button_disabled']};
+                color: {p['muted_light']};
+                border-color: {p['border']};
+            }}
+        """
+
+    def _secondary_header_button_style(self):
+        p = dashboard_palette(self._theme_mode)
+        return f"""
+            QPushButton {{
+                background: {p['button_bg']};
+                color: {p['text_soft']};
+                border: 1px solid {p['border']};
+                border-radius: 10px;
+                padding: 0 12px;
+                font-size: 11px;
+                font-weight: 800;
+            }}
+            QPushButton:hover {{
+                background: {p['button_hover_bg']};
+                color: {p['primary']};
+                border-color: {p['primary_soft_border']};
+            }}
+            QPushButton:disabled {{
+                background: {p['button_disabled']};
+                color: {p['muted_light']};
+                border-color: {p['border']};
+            }}
+        """
+
+    def _deployed_button_style(self):
+        p = dashboard_palette(self._theme_mode)
+        return f"""
+            QPushButton {{
+                background: {p['success']};
                 color: white;
-            }
+                border: 1px solid {p['success']};
+                border-radius: 10px;
+                padding: 0 12px;
+                font-size: 11px;
+                font-weight: 800;
+            }}
+            QPushButton:disabled {{
+                background: {p['success']};
+                color: white;
+            }}
         """
 
     @staticmethod
@@ -484,111 +512,135 @@ class DashboardPage(QWidget):
             "Créer ce projet dans Form@Prospect Cloud."
         )
 
-    @staticmethod
-    def _card_style():
-        return """
-            QFrame#DashboardCard {
-                background: #FFFFFF;
-                border: 1px solid #E7ECF3;
-                border-radius: 20px;
-            }
-        """
+    def _apply_visual_theme(self):
+        self._theme_mode = get_theme_preference()
+        self.setStyleSheet(dashboard_stylesheet(self._theme_mode))
+
+        for chart in (
+            getattr(self, "contact_chart", None),
+            getattr(self, "quality_donut", None),
+            getattr(self, "scoring_chart", None),
+        ):
+            apply_theme = getattr(chart, "apply_theme", None)
+            if callable(apply_theme):
+                apply_theme(self._theme_mode)
+
+        for frame, accent in getattr(self, "_pipeline_frames", []):
+            self._style_pipeline_frame(frame, accent)
+
+        for button in getattr(self, "_header_buttons", []):
+            if button is getattr(self, "deploy_button", None):
+                text = button.text()
+                if "Synchroniser" in text:
+                    button.setStyleSheet(self._deployed_button_style())
+                elif "archivé" in text.lower():
+                    button.setStyleSheet(
+                        self._secondary_header_button_style()
+                    )
+                else:
+                    button.setStyleSheet(self._button_style())
+                continue
+
+            kind = str(button.property("dashboardButtonKind") or "")
+            button.setStyleSheet(
+                self._button_style()
+                if kind == "primary"
+                else self._secondary_header_button_style()
+            )
+
+        self._set_hero_status(
+            getattr(self.hero_status, "text", lambda: "")(),
+            self._status_kind,
+        )
+        self._render_activity(self._last_activity_events)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_visual_theme()
+
+    def _set_hero_status(self, text: str, kind: str = "ready") -> None:
+        self._status_kind = str(kind or "ready")
+        self.hero_status.setText(text)
+        p = dashboard_palette(self._theme_mode)
+        color = (
+            p["success"]
+            if self._status_kind == "ready"
+            else p["primary"]
+        )
+        self.hero_status.setStyleSheet(
+            f"color:{color}; background:transparent; border:none;"
+        )
 
     @staticmethod
     def _apply_shadow(widget, *, blur=28, y=6, alpha=20):
         effect = QGraphicsDropShadowEffect(widget)
         effect.setBlurRadius(blur)
         effect.setOffset(0, y)
-        effect.setColor(QColor(7, 27, 56, alpha))
+        effect.setColor(QColor(2, 12, 27, alpha))
         widget.setGraphicsEffect(effect)
 
     def _section(self, title: str, subtitle: str = "", eyebrow: str = ""):
         card = QFrame()
         card.setObjectName("DashboardCard")
-        card.setStyleSheet(self._card_style())
-        self._apply_shadow(card, blur=26, y=7, alpha=18)
+        self._apply_shadow(card, blur=22, y=5, alpha=16)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(20, 18, 20, 20)
-        layout.setSpacing(7)
+        layout.setContentsMargins(17, 14, 17, 16)
+        layout.setSpacing(5)
 
         if eyebrow:
             eyebrow_label = QLabel(eyebrow)
-            eyebrow_label.setStyleSheet(
-                "font-size:9px; font-weight:900; letter-spacing:1px; color:#338CE4; "
-                "border:none; background:transparent;"
-            )
+            eyebrow_label.setObjectName("DashboardSectionEyebrow")
             layout.addWidget(eyebrow_label)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(
-            "font-size:18px; font-weight:900; color:#0B1220; "
-            "border:none; background:transparent;"
-        )
+        title_label.setObjectName("DashboardSectionTitle")
         layout.addWidget(title_label)
 
         if subtitle:
             subtitle_label = QLabel(subtitle)
-            subtitle_label.setStyleSheet(
-                "font-size:12px; color:#62748A; border:none; background:transparent;"
-            )
+            subtitle_label.setObjectName("DashboardSectionSubtitle")
             subtitle_label.setWordWrap(True)
             layout.addWidget(subtitle_label)
 
-        layout.addSpacing(4)
+        layout.addSpacing(2)
         return card
 
     def _metric_card(self, title: str, icon: str, caption: str = ""):
         card = QFrame()
         card.setObjectName("DashboardMetric")
-        card.setMinimumHeight(118)
+        card.setMinimumHeight(96)
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        card.setStyleSheet("""
-            QFrame#DashboardMetric {
-                background: #FFFFFF;
-                border: 1px solid #E7ECF3;
-                border-radius: 18px;
-            }
-        """)
-        self._apply_shadow(card, blur=24, y=6, alpha=16)
+        card.setAttribute(Qt.WA_Hover, True)
+        self._apply_shadow(card, blur=18, y=4, alpha=13)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(15, 13, 15, 12)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(2)
 
         head = QHBoxLayout()
-        head.setSpacing(8)
+        head.setSpacing(6)
 
         icon_chip = QLabel(icon)
-        icon_chip.setFixedSize(34, 34)
+        icon_chip.setObjectName("DashboardMetricIcon")
+        icon_chip.setFixedSize(28, 28)
         icon_chip.setAlignment(Qt.AlignCenter)
-        icon_chip.setStyleSheet(
-            "font-size:16px; background:#EAF4FF; border:none; border-radius:10px;"
-        )
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(
-            "font-size:12px; font-weight:800; color:#53657C; "
-            "border:none; background:transparent;"
-        )
+        title_label.setObjectName("DashboardMetricTitle")
+        title_label.setWordWrap(True)
         head.addWidget(icon_chip)
-        head.addWidget(title_label)
-        head.addStretch()
+        head.addWidget(title_label, 1)
 
         value = QLabel("0")
-        value.setStyleSheet(
-            "font-size:27px; font-weight:900; color:#0B1220; "
-            "border:none; background:transparent;"
-        )
+        value.setObjectName("DashboardMetricValue")
         value.setWordWrap(True)
 
         caption_label = QLabel(caption)
-        caption_label.setStyleSheet(
-            "font-size:10px; color:#94A3B8; border:none; background:transparent;"
-        )
+        caption_label.setObjectName("DashboardMetricCaption")
+        caption_label.setWordWrap(True)
 
         layout.addLayout(head)
-        layout.addSpacing(2)
         layout.addWidget(value)
         layout.addWidget(caption_label)
         return card, value
@@ -599,98 +651,81 @@ class DashboardPage(QWidget):
 
         card = QFrame()
         card.setObjectName("WeeklyQuoteCard")
-        card.setMinimumHeight(120)
-        card.setStyleSheet("""
-            QFrame#WeeklyQuoteCard {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #071B38,
-                    stop:0.55 #0B2A52,
-                    stop:1 #164B7E
-                );
-                border: 1px solid #183D66;
-                border-radius: 22px;
-            }
-        """)
-        self._apply_shadow(card, blur=34, y=8, alpha=34)
+        card.setMinimumHeight(82)
+        self._apply_shadow(card, blur=26, y=6, alpha=28)
 
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(24, 18, 24, 18)
-        layout.setSpacing(18)
+        layout.setContentsMargins(18, 12, 20, 12)
+        layout.setSpacing(13)
 
         badge = QLabel("✦")
-        badge.setFixedSize(48, 48)
+        badge.setObjectName("DashboardQuoteIcon")
+        badge.setFixedSize(38, 38)
         badge.setAlignment(Qt.AlignCenter)
-        badge.setStyleSheet(
-            "font-size:22px; color:white; background:rgba(51,140,228,0.25); "
-            "border:1px solid rgba(255,255,255,0.12); border-radius:14px;"
-        )
 
         texts = QVBoxLayout()
-        texts.setSpacing(4)
-        overline = QLabel(f"CITATION DE LA SEMAINE  •  {theme.upper()}")
-        overline.setStyleSheet(
-            "font-size:9px; font-weight:900; letter-spacing:1.2px; color:#8FC7FF; "
-            "border:none; background:transparent;"
-        )
+        texts.setSpacing(2)
+        overline = QLabel(f"IMPULSION DE LA SEMAINE  •  {theme.upper()}")
+        overline.setObjectName("DashboardQuoteOverline")
         quote_label = QLabel(f"« {quote} »")
+        quote_label.setObjectName("DashboardQuoteText")
         quote_label.setWordWrap(True)
-        quote_label.setStyleSheet(
-            "font-size:17px; font-weight:700; color:#FFFFFF; "
-            "border:none; background:transparent;"
-        )
         author = QLabel("— Form@Prospect")
-        author.setStyleSheet(
-            "font-size:11px; color:#BFD7EE; border:none; background:transparent;"
-        )
+        author.setObjectName("DashboardQuoteAuthor")
         texts.addWidget(overline)
         texts.addWidget(quote_label)
         texts.addWidget(author)
 
-        layout.addWidget(badge, 0, Qt.AlignTop)
+        layout.addWidget(badge)
         layout.addLayout(texts, 1)
         return card
 
     def _build_enrichment_card(self):
-        card = self._section("Enrichissement", "Progression globale du projet actif.", "PROGRESSION")
-        self.enrichment_label = QLabel("0 / 0 prospects enrichis")
-        self.enrichment_label.setStyleSheet(
-            "font-size:14px; font-weight:800; color:#0B1220; border:none; background:transparent;"
+        card = self._section(
+            "Enrichissement",
+            "Avancement du traitement des prospects.",
+            "DATA FLOW",
         )
+        self.enrichment_label = QLabel("0 / 0 prospects enrichis")
+        self.enrichment_label.setObjectName("DashboardBodyStrong")
+
         self.enrichment_progress = QProgressBar()
+        self.enrichment_progress.setObjectName("EnrichmentProgress")
         self.enrichment_progress.setRange(0, 100)
         self.enrichment_progress.setValue(0)
-        self.enrichment_progress.setFixedHeight(18)
-        self.enrichment_progress.setStyleSheet(f"""
-            QProgressBar {{ background: #EEF4FA; border: none; border-radius: 9px;
-                text-align: center; color: #0B1220; font-weight: 800; }}
-            QProgressBar::chunk {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #338CE4, stop:1 #67B0F4);
-                border-radius: 9px;
-            }}
-        """)
+        self.enrichment_progress.setFixedHeight(17)
+
         self.enrichment_detail = QLabel("Aucune donnée")
-        self.enrichment_detail.setStyleSheet(
-            "font-size:11px; color:#7A899C; border:none; background:transparent;"
-        )
+        self.enrichment_detail.setObjectName("DashboardBodyMuted")
+        self.enrichment_detail.setWordWrap(True)
+
         card.layout().addWidget(self.enrichment_label)
         card.layout().addWidget(self.enrichment_progress)
         card.layout().addWidget(self.enrichment_detail)
+        card.layout().addStretch(1)
         return card
 
+    def _set_health_compact(self, compact: bool) -> None:
+        """Réduit la ligne santé uniquement quand aucun projet n'est actif."""
+        if compact:
+            self.quality_donut.setMinimumHeight(78)
+            self.quality_donut.setMaximumHeight(90)
+        else:
+            self.quality_donut.setMinimumHeight(132)
+            self.quality_donut.setMaximumHeight(145)
+
     def _build_actions_card(self):
-        card = self._section("Priorités du jour", "Ce qui mérite votre attention maintenant.", "FOCUS")
-        card.setStyleSheet("""
-            QFrame#DashboardCard {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FFFFFF, stop:1 #F8FBFF);
-                border:1px solid #E3EBF4;
-                border-radius:20px;
-            }
-        """)
+        card = self._section(
+            "Priorités du jour",
+            "Les signaux à traiter maintenant.",
+            "FOCUS",
+        )
         grid = QGridLayout()
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(7)
         items = [
-            ("actions_today", "Actions aujourd'hui", "📅"),
-            ("actions_overdue", "Actions en retard", "⚠️"),
+            ("actions_today", "Aujourd'hui", "📅"),
+            ("actions_overdue", "En retard", "⚠️"),
             ("high_priority", "Priorités fortes", "🔥"),
             ("actions_next_7_days", "7 prochains jours", "🗓️"),
         ]
@@ -703,122 +738,141 @@ class DashboardPage(QWidget):
 
     def _mini_action(self, title, icon):
         frame = QFrame()
-        frame.setStyleSheet(
-            "QFrame { background:#F8FBFE; border:1px solid #E8EEF5; border-radius:14px; }"
-        )
+        frame.setObjectName("DashboardMiniAction")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(12, 11, 12, 11)
-        layout.setSpacing(9)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(7)
 
         chip = QLabel(icon)
-        chip.setFixedSize(28, 28)
+        chip.setObjectName("DashboardMiniActionIcon")
+        chip.setFixedSize(25, 25)
         chip.setAlignment(Qt.AlignCenter)
-        chip.setStyleSheet(
-            "font-size:13px; background:#FFFFFF; border:1px solid #E7ECF3; border-radius:9px;"
-        )
+
         label = QLabel(title)
-        label.setStyleSheet(
-            "font-size:11px; font-weight:750; color:#61738A; "
-            "border:none; background:transparent;"
-        )
+        label.setObjectName("DashboardMiniActionLabel")
+        label.setWordWrap(True)
+
         value = QLabel("0")
-        value.setStyleSheet(
-            "font-size:18px; font-weight:900; color:#0B1220; "
-            "border:none; background:transparent;"
-        )
+        value.setObjectName("DashboardMiniActionValue")
+
         layout.addWidget(chip)
         layout.addWidget(label, 1)
         layout.addWidget(value)
         return frame, value
 
+    def _style_pipeline_frame(self, frame: QFrame, accent: str) -> None:
+        p = dashboard_palette(self._theme_mode)
+        frame.setStyleSheet(
+            f"""
+            QFrame#DashboardPipelineItem {{
+                background:{p['surface_alt']};
+                border:1px solid {p['border']};
+                border-left:4px solid {accent};
+                border-radius:10px;
+            }}
+            """
+        )
+
     def _build_pipeline_card(self):
-        card = self._section("Pipeline commercial", "Répartition de votre portefeuille par étape.", "CONVERSION")
-        card.setStyleSheet("""
-            QFrame#DashboardCard {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FFFFFF, stop:1 #FBFCFF);
-                border:1px solid #E3EBF4;
-                border-radius:20px;
-            }
-        """)
+        card = self._section(
+            "Pipeline commercial",
+            "Répartition immédiate du portefeuille par étape.",
+            "CONVERSION",
+        )
         self.pipeline_grid = QGridLayout()
-        self.pipeline_grid.setSpacing(8)
+        self.pipeline_grid.setHorizontalSpacing(7)
+        self.pipeline_grid.setVerticalSpacing(7)
+
         for index, name in enumerate(PIPELINE):
             frame = QFrame()
-            color = PIPELINE_COLORS.get(name, "#F3F4F6")
-            frame.setStyleSheet(f"QFrame {{ background: {color}; border: 1px solid #E8EDF3; border-radius: 13px; }}")
+            frame.setObjectName("DashboardPipelineItem")
+            is_new = "Nouveau" in str(name)
+            color = "#338CE4" if is_new else PIPELINE_COLORS.get(name, "#94A3B8")
+            self._pipeline_frames.append((frame, color))
+            self._style_pipeline_frame(frame, color)
+
             layout = QHBoxLayout(frame)
-            layout.setContentsMargins(10, 8, 10, 8)
-            label = QLabel(name)
+            layout.setContentsMargins(9, 7, 9, 7)
+            layout.setSpacing(6)
+
+            display_name = str(name)
+            if is_new:
+                display_name = display_name.replace("🟢", "").strip()
+                label = QLabel(
+                    f'<span style="color:#338CE4;font-size:12px;">■</span>&nbsp;&nbsp;{display_name}'
+                )
+                label.setTextFormat(Qt.RichText)
+            else:
+                label = QLabel(display_name)
+            label.setObjectName("DashboardPipelineLabel")
             label.setWordWrap(True)
-            label.setStyleSheet("font-size: 11px; font-weight: 800; color: #111827; border: none;")
+
             value = QLabel("0")
-            value.setStyleSheet("font-size: 16px; font-weight: 900; color: #111827; border: none;")
+            value.setObjectName("DashboardPipelineValue")
+
             layout.addWidget(label, 1)
             layout.addWidget(value)
             self.pipeline_values[name] = value
-            self.pipeline_grid.addWidget(frame, index // 2, index % 2)
+            self.pipeline_grid.addWidget(frame, index // 3, index % 3)
+
         card.layout().addLayout(self.pipeline_grid)
         return card
 
     def _build_scoring_card(self):
         card = self._section(
             "Scoring commercial",
-            "Classement explicable des prospects selon la qualité et la complétude de leurs données.",
+            "Le potentiel commercial mis en évidence sans masquer les données.",
             "PRIORISATION",
         )
         self.scoring_chart = HorizontalBarChart()
-        self.scoring_chart.setMaximumHeight(170)
+        self.scoring_chart.setMaximumHeight(142)
+        self.scoring_chart.setMinimumHeight(120)
 
         self.scoring_empty = QFrame()
-        self.scoring_empty.setStyleSheet(
-            "QFrame { background:#F8FBFE; border:1px dashed #D7E4F1; border-radius:16px; }"
-        )
+        self.scoring_empty.setObjectName("DashboardEmptyState")
         empty_layout = QHBoxLayout(self.scoring_empty)
-        empty_layout.setContentsMargins(16, 14, 16, 14)
-        empty_layout.setSpacing(12)
+        empty_layout.setContentsMargins(13, 10, 13, 10)
+        empty_layout.setSpacing(9)
 
         empty_icon = QLabel("◎")
-        empty_icon.setFixedSize(34, 34)
+        empty_icon.setObjectName("DashboardEmptyIcon")
+        empty_icon.setFixedSize(30, 30)
         empty_icon.setAlignment(Qt.AlignCenter)
-        empty_icon.setStyleSheet(
-            "font-size:16px; color:#338CE4; background:#EAF4FF; "
-            "border:none; border-radius:11px;"
-        )
 
         empty_texts = QVBoxLayout()
-        empty_texts.setSpacing(2)
+        empty_texts.setSpacing(1)
         self.scoring_empty_title = QLabel("Scoring à initialiser")
-        self.scoring_empty_title.setStyleSheet(
-            "font-size:12px; font-weight:900; color:#23344D; "
-            "border:none; background:transparent;"
-        )
+        self.scoring_empty_title.setObjectName("DashboardEmptyTitle")
         self.scoring_empty_detail = QLabel(
-            "Ouvrez le CRM puis utilisez « Calculer les scores » pour prioriser votre portefeuille."
+            "Utilisez « Calculer les scores » dans le CRM pour prioriser le portefeuille."
         )
+        self.scoring_empty_detail.setObjectName("DashboardEmptyDetail")
         self.scoring_empty_detail.setWordWrap(True)
-        self.scoring_empty_detail.setStyleSheet(
-            "font-size:11px; color:#7A899C; border:none; background:transparent;"
-        )
         empty_texts.addWidget(self.scoring_empty_title)
         empty_texts.addWidget(self.scoring_empty_detail)
 
         empty_layout.addWidget(empty_icon)
         empty_layout.addLayout(empty_texts, 1)
 
-        self.scoring_summary = QLabel("Cliquez sur « Calculer les scores » dans le CRM pour initialiser le classement.")
-        self.scoring_summary.setWordWrap(True)
-        self.scoring_summary.setStyleSheet(
-            "font-size:11px; color:#7A899C; border:none; background:transparent;"
+        self.scoring_summary = QLabel(
+            "Cliquez sur « Calculer les scores » dans le CRM pour initialiser le classement."
         )
+        self.scoring_summary.setObjectName("DashboardBodyMuted")
+        self.scoring_summary.setWordWrap(True)
+
         card.layout().addWidget(self.scoring_chart)
         card.layout().addWidget(self.scoring_empty)
         card.layout().addWidget(self.scoring_summary)
         return card
 
     def _build_recent_activity_card(self):
-        card = self._section("Activité récente", "Les dernières opérations du projet.", "HISTORIQUE")
+        card = self._section(
+            "Activité récente",
+            "Les dernières opérations visibles du projet.",
+            "HISTORIQUE",
+        )
         self.activity_layout = QVBoxLayout()
-        self.activity_layout.setSpacing(6)
+        self.activity_layout.setSpacing(5)
         card.layout().addLayout(self.activity_layout)
         return card
 
@@ -830,45 +884,58 @@ class DashboardPage(QWidget):
                 widget.deleteLater()
 
     def _render_activity(self, events):
+        self._last_activity_events = list(events or [])
         self._clear_activity()
-        if not events:
+
+        if not self._last_activity_events:
             empty = QFrame()
-            empty.setStyleSheet(
-                "QFrame { background:#FBFDFF; border:1px dashed #DCE5EF; border-radius:14px; }"
-            )
+            empty.setObjectName("DashboardEmptyState")
             empty_layout = QHBoxLayout(empty)
-            empty_layout.setContentsMargins(14, 12, 14, 12)
+            empty_layout.setContentsMargins(12, 10, 12, 10)
+
             icon = QLabel("✦")
+            icon.setObjectName("DashboardEmptyIcon")
             icon.setFixedSize(28, 28)
             icon.setAlignment(Qt.AlignCenter)
-            icon.setStyleSheet(
-                "font-size:13px; color:#338CE4; background:#EAF4FF; border:none; border-radius:9px;"
+
+            label = QLabel(
+                "Aucune activité récente. Les prochaines actions apparaîtront ici."
             )
-            label = QLabel("Aucune activité récente. Les prochaines actions apparaîtront ici.")
+            label.setObjectName("DashboardEmptyDetail")
             label.setWordWrap(True)
-            label.setStyleSheet(
-                "font-size:11px; color:#7A899C; border:none; background:transparent;"
-            )
+
             empty_layout.addWidget(icon)
             empty_layout.addWidget(label, 1)
             self.activity_layout.addWidget(empty)
             return
-        level_icons = {"success": "✅", "warning": "⚠️", "error": "❌", "info": "ℹ️"}
-        for event in events[:6]:
+
+        level_icons = {
+            "success": "✅",
+            "warning": "⚠️",
+            "error": "❌",
+            "info": "ℹ️",
+        }
+        for event in self._last_activity_events[:5]:
             timestamp = event.get("timestamp", "")
             try:
                 time_text = datetime.fromisoformat(timestamp).strftime("%d/%m %H:%M")
             except (ValueError, TypeError):
                 time_text = timestamp[:16].replace("T", " ")
+
             row = QFrame()
-            row.setStyleSheet("QFrame { background:#F8FBFE; border:1px solid #E8EEF5; border-radius:12px; }")
+            row.setObjectName("DashboardActivityRow")
             layout = QHBoxLayout(row)
-            layout.setContentsMargins(10, 8, 10, 8)
+            layout.setContentsMargins(9, 7, 9, 7)
+            layout.setSpacing(7)
+
             icon = level_icons.get(event.get("level"), "•")
             title = QLabel(f"{icon}  {event.get('title', 'Activité')}")
-            title.setStyleSheet(f"font-size: 12px; font-weight: 800; color: {TEXT_PRIMARY}; border: none;")
+            title.setObjectName("DashboardActivityTitle")
+            title.setWordWrap(True)
+
             when = QLabel(time_text)
-            when.setStyleSheet(f"font-size: 11px; color: {TEXT_SECONDARY}; border: none;")
+            when.setObjectName("DashboardActivityTime")
+
             layout.addWidget(title, 1)
             layout.addWidget(when)
             self.activity_layout.addWidget(row)
@@ -945,18 +1012,12 @@ class DashboardPage(QWidget):
         self._update_greeting()
         self._apply_role_permissions()
         self.subtitle.setText("Créez ou ouvrez un projet pour commencer.")
+        self.context_project_value.setText("Aucun projet actif")
+        self.context_source_value.setText("Aucune source")
         if self._is_commercial():
-            self.hero_status.setText("●  Espace Cloud actif")
-            self.hero_status.setStyleSheet(
-                "font-size:10px; font-weight:800; color:#338CE4; "
-                "border:none; background:transparent;"
-            )
+            self._set_hero_status("●  Espace Cloud actif", "active")
         else:
-            self.hero_status.setText("●  Prêt à prospecter")
-            self.hero_status.setStyleSheet(
-                "font-size:10px; font-weight:800; color:#16A34A; "
-                "border:none; background:transparent;"
-            )
+            self._set_hero_status("●  Prêt à prospecter", "ready")
         for key, value in self.kpi_values.items():
             if key == "annual_revenue":
                 continue
@@ -971,6 +1032,7 @@ class DashboardPage(QWidget):
         self.contact_chart.set_items([])
         self.contact_chart.setVisible(False)
         self.contact_empty.setVisible(True)
+        self._set_health_compact(True)
         self.quality_donut.set_value(0)
         self.quality_details.setText("Aucun projet actif")
         self.enrichment_label.setText("0 / 0 prospects enrichis")
@@ -1024,15 +1086,15 @@ class DashboardPage(QWidget):
             self._update_greeting()
             self._apply_role_permissions()
             self.subtitle.setText(
-                "Voici l'état de votre prospection "
-                "et les priorités à traiter."
+                "Voici l'état de votre prospection et les priorités à traiter."
             )
-            self.hero_status.setText(
-                "●  Espace Cloud actif" if self._is_commercial() else "●  Projet actif"
+            self.context_project_value.setText(str(project_name))
+            self.context_source_value.setText(
+                "Source Cloud" if context.is_cloud else "Source locale"
             )
-            self.hero_status.setStyleSheet(
-                "font-size:10px; font-weight:800; color:#338CE4; "
-                "border:none; background:transparent;"
+            self._set_hero_status(
+                "●  Espace Cloud actif" if self._is_commercial() else "●  Projet actif",
+                "active",
             )
 
             for key in ("prospects", "telephones", "emails", "sites"):
@@ -1051,6 +1113,7 @@ class DashboardPage(QWidget):
             self.contact_chart.set_items(contact_items)
             self.contact_chart.setVisible(bool(contact_items))
             self.contact_empty.setVisible(not bool(contact_items))
+            self._set_health_compact(False)
 
             score = data["kpi"]["quality_score"]
             self.quality_donut.set_value(score)

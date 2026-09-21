@@ -269,7 +269,14 @@ class CRMFiltersBar(QWidget):
                 continue
             texte = str(valeur).strip()
             if texte:
-                combo.addItem(texte, texte)
+                if combo is self.pipeline_filtre and "nouveau" in texte.lower():
+                    from PySide6.QtGui import QColor, QIcon, QPixmap
+
+                    marker = QPixmap(9, 9)
+                    marker.fill(QColor("#338CE4"))
+                    combo.addItem(QIcon(marker), "Nouveau", texte)
+                else:
+                    combo.addItem(texte, texte)
 
         index = combo.findData(valeur_actuelle)
         if index >= 0:
