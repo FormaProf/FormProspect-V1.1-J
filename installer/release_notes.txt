@@ -1,10 +1,10 @@
-Amélioration du suivi des paiements, ventes et commissions
-Amélioration de la gestion des commissions et de la TVA des partenaires commerciaux
-Ajout du transfert de portefeuille entre commerciaux
-Ajout d'un espace dédié aux formateurs
-Amélioration de l'enrichissement et de la gestion des coordonnées prospects
-Amélioration de la gestion des activités et données Cloud
-Amélioration du workflow documentaire et du suivi des apprenants
-Amélioration de la gestion des formateurs
-Correction de l'affichage des heures des actions planifiées dans l'agenda
-Améliorations générales de fiabilité et de stabilité
+Nouvelle interface premium pour le CRM et les projets commerciaux
+Ajout de cartes projets dynamiques et thématiques avec animations au survol
+Amélioration de l'espace Landing Page côté commercial
+Harmonisation du design entre Form@Prospect Classique, UI Clair et UI Sombre
+Amélioration importante des performances de l'Agenda et réduction des rechargements Cloud
+Amélioration de l'affectation et de la réaffectation des prospects et projets commerciaux
+Ajout et amélioration de l'historique des réaffectations commerciales
+Amélioration de l'affichage des sources, indicateurs et coordonnées prospects
+Amélioration du suivi des projets commerciaux et des espaces de travail commerciaux
+Améliorations générales d'ergonomie, de stabilité et de performances
