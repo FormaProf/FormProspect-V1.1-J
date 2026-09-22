@@ -1,10 +1,8 @@
-Nouvelle interface premium pour le CRM et les projets commerciaux
-Ajout de cartes projets dynamiques et thématiques avec animations au survol
-Amélioration de l'espace Landing Page côté commercial
-Harmonisation du design entre Form@Prospect Classique, UI Clair et UI Sombre
-Amélioration importante des performances de l'Agenda et réduction des rechargements Cloud
-Amélioration de l'affectation et de la réaffectation des prospects et projets commerciaux
-Ajout et amélioration de l'historique des réaffectations commerciales
-Amélioration de l'affichage des sources, indicateurs et coordonnées prospects
-Amélioration du suivi des projets commerciaux et des espaces de travail commerciaux
-Améliorations générales d'ergonomie, de stabilité et de performances
+Nouvelle interface premium harmonisée sur les principaux espaces Form@Prospect
+Nouveau mode responsive pour améliorer l utilisation sur les PC portables et petits écrans
+Refonte premium du Dashboard, Agenda, Ventes et commissions, Documents et Devis et factures
+Refonte de l Assistant IA, de l Historique et de Mon compte
+Amélioration de la navigation CRM et affichage dynamique de l univers commercial actif
+Amélioration des performances de l Agenda et limitation des rechargements Cloud inutiles
+Harmonisation complète des thèmes Classique, UI Clair et UI Sombre
+Améliorations générales de lisibilité, ergonomie et stabilité
