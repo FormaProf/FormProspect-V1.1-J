@@ -20,9 +20,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.premium_theme import BORDER, PAGE_BG, PRIMARY, PRIMARY_DARK, TEXT
 from core.session import SessionState
+from core.theme_settings import get_theme_preference
 from services.auth_service import AuthService
+from ui.account_premium_theme import (
+    account_page_palette,
+    commercial_account_stylesheet,
+)
 from ui.components.notifications import NotificationManager
 from ui.utils_profile import circular_avatar
 
@@ -58,7 +62,6 @@ class CommercialAccountPage(QWidget):
         super().__init__()
         self.auth_service = auth_service
         self.setObjectName("CommercialAccountPage")
-        self.setStyleSheet(self._style())
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -70,52 +73,52 @@ class CommercialAccountPage(QWidget):
         self.scroll_area.setFrameShape(QFrame.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.scroll_area.setStyleSheet(
-            f"""
-            QScrollArea#AccountScrollArea {{
-                border: none;
-                background: {PAGE_BG};
-            }}
-            QScrollBar:vertical {{
-                background: transparent;
-                width: 11px;
-                margin: 6px 2px 6px 0;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {BORDER};
-                min-height: 42px;
-                border-radius: 5px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {PRIMARY};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {{
-                background: transparent;
-            }}
-            """
-        )
 
         content = QWidget()
         content.setObjectName("CommercialAccountContent")
 
         root = QVBoxLayout(content)
-        root.setContentsMargins(42, 28, 42, 30)
-        root.setSpacing(16)
+        self.content_layout = root
+        root.setContentsMargins(22, 18, 22, 20)
+        root.setSpacing(12)
 
-        title = QLabel("Mon compte")
-        title.setObjectName("PageTitle")
-        subtitle = QLabel(
-            "Gérez vos informations personnelles et la sécurité de votre compte."
+        root.addWidget(self._build_hero())
+
+        metrics = QHBoxLayout()
+        metrics.setSpacing(10)
+
+        identity_card, self.metric_identity_value, self.metric_identity_caption = (
+            self._build_metric_card(
+                "●",
+                "Identité",
+                "—",
+                "Profil utilisateur",
+                "blue",
+            )
         )
-        subtitle.setObjectName("PageSubtitle")
-        root.addWidget(title)
-        root.addWidget(subtitle)
-        root.addSpacing(5)
+        access_card, self.metric_access_value, self.metric_access_caption = (
+            self._build_metric_card(
+                "↗",
+                "Accès",
+                "—",
+                "Mode de connexion",
+                "violet",
+            )
+        )
+        license_card, self.metric_license_value, self.metric_license_caption = (
+            self._build_metric_card(
+                "◆",
+                "Licence",
+                "—",
+                "État de l'abonnement",
+                "green",
+            )
+        )
+
+        metrics.addWidget(identity_card, 1)
+        metrics.addWidget(access_card, 1)
+        metrics.addWidget(license_card, 1)
+        root.addLayout(metrics)
 
         self.profile_card = self._build_profile_card()
         self.profile_card.setMinimumHeight(365)
@@ -132,14 +135,146 @@ class CommercialAccountPage(QWidget):
         self.scroll_area.setWidget(content)
         outer.addWidget(self.scroll_area)
 
+        self.apply_appearance_theme()
         self.rafraichir()
 
-    def _build_profile_card(self) -> QFrame:
-        card = self._card("Mon profil")
-        body = QHBoxLayout()
-        body.setSpacing(36)
+    def add_scroll_footer(self, widget: QWidget) -> None:
+        """Ajoute un bloc au contenu défilant, avant l'espace final."""
+        index = max(0, self.content_layout.count() - 1)
+        self.content_layout.insertWidget(index, widget)
 
-        left = QVBoxLayout()
+    def apply_appearance_theme(self) -> None:
+        self.setStyleSheet(self._style())
+
+    def _build_hero(self) -> QFrame:
+        hero = QFrame()
+        hero.setObjectName("AccountHero")
+        hero.setMinimumHeight(142)
+
+        layout = QHBoxLayout(hero)
+        layout.setContentsMargins(20, 16, 18, 16)
+        layout.setSpacing(16)
+
+        orb = QFrame()
+        orb.setObjectName("AccountHeroOrb")
+        orb.setFixedSize(68, 68)
+        orb_layout = QVBoxLayout(orb)
+        orb_layout.setContentsMargins(0, 0, 0, 0)
+
+        glyph = QLabel("◎")
+        glyph.setObjectName("AccountHeroGlyph")
+        glyph.setAlignment(Qt.AlignCenter)
+        orb_layout.addWidget(glyph)
+        layout.addWidget(orb, 0, Qt.AlignVCenter)
+
+        copy = QVBoxLayout()
+        copy.setSpacing(4)
+
+        eyebrow = QLabel("ACCOUNT CENTER  •  IDENTITÉ & SÉCURITÉ")
+        eyebrow.setObjectName("AccountHeroEyebrow")
+
+        title = QLabel("Mon compte")
+        title.setObjectName("AccountHeroTitle")
+
+        subtitle = QLabel(
+            "Gérez votre identité, vos accès et les paramètres essentiels "
+            "de votre espace Form@Prospect."
+        )
+        subtitle.setObjectName("AccountHeroSubtitle")
+        subtitle.setWordWrap(True)
+
+        copy.addWidget(eyebrow)
+        copy.addWidget(title)
+        copy.addWidget(subtitle)
+        layout.addLayout(copy, 1)
+
+        status = QVBoxLayout()
+        status.setSpacing(7)
+        status.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        active = QLabel("●  COMPTE ACTIF")
+        active.setObjectName("AccountActiveBadge")
+        active.setAlignment(Qt.AlignCenter)
+        active.setFixedHeight(30)
+        active.setMinimumWidth(150)
+
+        self.hero_role_value = QLabel("Utilisateur")
+        self.hero_role_value.setObjectName("AccountHeroMeta")
+        self.hero_role_value.setAlignment(Qt.AlignCenter)
+        self.hero_role_value.setMinimumWidth(150)
+
+        self.hero_access_value = QLabel("LOCAL")
+        self.hero_access_value.setObjectName("AccountHeroMeta")
+        self.hero_access_value.setAlignment(Qt.AlignCenter)
+        self.hero_access_value.setMinimumWidth(150)
+
+        status.addWidget(active)
+        status.addWidget(self.hero_role_value)
+        status.addWidget(self.hero_access_value)
+        layout.addLayout(status)
+
+        return hero
+
+    @staticmethod
+    def _build_metric_card(
+        icon: str,
+        name: str,
+        value: str,
+        caption: str,
+        tone: str,
+    ):
+        card = QFrame()
+        card.setProperty("accountMetricCard", True)
+        card.setMinimumHeight(82)
+
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(13, 11, 13, 11)
+        layout.setSpacing(10)
+
+        icon_label = QLabel(icon)
+        icon_label.setProperty("accountMetricIcon", True)
+        icon_label.setProperty("accountTone", tone)
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setFixedSize(34, 34)
+        layout.addWidget(icon_label, 0, Qt.AlignTop)
+
+        copy = QVBoxLayout()
+        copy.setSpacing(2)
+
+        name_label = QLabel(name)
+        name_label.setProperty("accountMetricName", True)
+
+        value_label = QLabel(value)
+        value_label.setProperty("accountMetricValue", True)
+        value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        caption_label = QLabel(caption)
+        caption_label.setProperty("accountMetricCaption", True)
+        caption_label.setWordWrap(True)
+
+        copy.addWidget(name_label)
+        copy.addWidget(value_label)
+        copy.addWidget(caption_label)
+        layout.addLayout(copy, 1)
+
+        return card, value_label, caption_label
+
+    def _build_profile_card(self) -> QFrame:
+        card = self._card(
+            "Mon profil",
+            "IDENTITÉ",
+            "Informations visibles dans votre espace utilisateur.",
+        )
+        body = QHBoxLayout()
+        body.setSpacing(18)
+
+        avatar_panel = QFrame()
+        avatar_panel.setObjectName("AvatarPanel")
+        avatar_panel.setMinimumWidth(238)
+
+        left = QVBoxLayout(avatar_panel)
+        left.setContentsMargins(18, 16, 18, 16)
+        left.setSpacing(8)
         left.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
         self.avatar = QLabel()
@@ -147,7 +282,6 @@ class CommercialAccountPage(QWidget):
         self.avatar.setFixedSize(174, 174)
         self.avatar.setAlignment(Qt.AlignCenter)
         left.addWidget(self.avatar, 0, Qt.AlignHCenter)
-        left.addSpacing(10)
 
         upload = QPushButton("↑  Modifier ma photo")
         upload.setObjectName("PrimaryButton")
@@ -160,12 +294,11 @@ class CommercialAccountPage(QWidget):
         remove.clicked.connect(self._remove_photo)
         left.addWidget(remove, 0, Qt.AlignHCenter)
 
-        formats = QLabel("Formats acceptés : JPG, PNG\nTaille max. : 2 Mo")
+        formats = QLabel("JPG / PNG  •  2 Mo maximum")
         formats.setObjectName("Hint")
         formats.setAlignment(Qt.AlignCenter)
         left.addWidget(formats)
-
-        body.addLayout(left)
+        body.addWidget(avatar_panel)
 
         details = QVBoxLayout()
         details.setSpacing(0)
@@ -174,15 +307,16 @@ class CommercialAccountPage(QWidget):
         self.role_value = self._detail_row(details, "■", "Rôle", badge=True)
         self.status_value = self._detail_row(
             details,
-            "○",
+            "✓",
             "Statut du compte",
             success=True,
         )
         self.email_value = self._detail_row(details, "✉", "Adresse e-mail")
-        self.login_value = self._detail_row(details, "▷", "Dernière connexion")
+        self.login_value = self._detail_row(details, "↗", "Dernière connexion")
 
         edit_identity = QPushButton("✎  Modifier mes informations")
         edit_identity.setObjectName("SecondaryButton")
+        edit_identity.setMinimumWidth(205)
         edit_identity.clicked.connect(self._edit_identity)
 
         details.addSpacing(14)
@@ -195,7 +329,11 @@ class CommercialAccountPage(QWidget):
         return card
 
     def _build_commercial_organization_card(self) -> QFrame:
-        card = self._card("Organisation commerciale")
+        card = self._card(
+            "Organisation commerciale",
+            "RATTACHEMENT",
+            "Informations de rattachement de votre compte Cloud.",
+        )
 
         body = QVBoxLayout()
         body.setSpacing(0)
@@ -221,16 +359,26 @@ class CommercialAccountPage(QWidget):
         return card
 
     def _build_security_card(self) -> QFrame:
-        card = self._card("Sécurité")
-        row = QHBoxLayout()
+        card = self._card(
+            "Sécurité",
+            "PROTECTION DU COMPTE",
+            "Contrôlez les accès à votre espace Form@Prospect.",
+        )
 
-        lock = QLabel("●")
+        panel = QFrame()
+        panel.setObjectName("FeaturePanel")
+        row = QHBoxLayout(panel)
+        row.setContentsMargins(14, 12, 14, 12)
+        row.setSpacing(12)
+
+        lock = QLabel("◉")
         lock.setObjectName("FeatureIcon")
-        lock.setFixedSize(54, 54)
+        lock.setFixedSize(46, 46)
         lock.setAlignment(Qt.AlignCenter)
         row.addWidget(lock)
 
         text = QVBoxLayout()
+        text.setSpacing(3)
 
         strong = QLabel("Changer mon mot de passe")
         strong.setObjectName("FeatureTitle")
@@ -239,33 +387,44 @@ class CommercialAccountPage(QWidget):
             "Mettez à jour votre mot de passe régulièrement pour protéger votre compte."
         )
         desc.setObjectName("FeatureDescription")
+        desc.setWordWrap(True)
 
         text.addWidget(strong)
         text.addWidget(desc)
         row.addLayout(text, 1)
 
-        button = QPushButton("🔒  Changer mon mot de passe  ›")
+        button = QPushButton("Changer le mot de passe  ›")
         button.setObjectName("SecondaryButton")
         button.clicked.connect(self._change_password)
         row.addWidget(button)
 
-        card.layout().addLayout(row)
+        card.layout().addWidget(panel)
         return card
 
     def _build_license_card(self) -> QFrame:
-        card = self._card("Licence")
-        row = QHBoxLayout()
+        card = self._card(
+            "Licence",
+            "ENVIRONNEMENT",
+            "Informations de licence liées à votre espace utilisateur.",
+        )
+
+        panel = QFrame()
+        panel.setObjectName("FeaturePanel")
+        row = QHBoxLayout(panel)
+        row.setContentsMargins(14, 12, 14, 12)
+        row.setSpacing(12)
 
         icon = QLabel("◆")
         icon.setObjectName("FeatureIcon")
-        icon.setFixedSize(54, 54)
+        icon.setFixedSize(46, 46)
         icon.setAlignment(Qt.AlignCenter)
         row.addWidget(icon)
 
         text = QVBoxLayout()
+        text.setSpacing(3)
 
         self.license_plan = QLabel("Licence Pro")
-        self.license_plan.setObjectName("FeatureTitle")
+        self.license_plan.setObjectName("LicensePlan")
 
         self.license_status = QLabel("Statut : Active")
         self.license_status.setObjectName("LicenseStatus")
@@ -274,21 +433,41 @@ class CommercialAccountPage(QWidget):
         text.addWidget(self.license_status)
         row.addLayout(text, 1)
 
-        card.layout().addLayout(row)
+        card.layout().addWidget(panel)
         return card
 
-    def _card(self, title: str) -> QFrame:
+    @staticmethod
+    def _card(
+        title: str,
+        eyebrow: str = "PARAMÈTRES",
+        description: str = "",
+    ) -> QFrame:
         card = QFrame()
         card.setObjectName("AccountCard")
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(18, 15, 18, 16)
+        layout.setSpacing(10)
+
+        heading = QVBoxLayout()
+        heading.setSpacing(2)
+
+        overline = QLabel(eyebrow)
+        overline.setObjectName("SectionEyebrow")
 
         label = QLabel(title)
         label.setObjectName("SectionTitle")
-        layout.addWidget(label)
 
+        heading.addWidget(overline)
+        heading.addWidget(label)
+
+        if description:
+            desc = QLabel(description)
+            desc.setObjectName("SectionDescription")
+            desc.setWordWrap(True)
+            heading.addWidget(desc)
+
+        layout.addLayout(heading)
         return card
 
     def _detail_row(
@@ -302,19 +481,20 @@ class CommercialAccountPage(QWidget):
     ) -> QLabel:
         frame = QFrame()
         frame.setObjectName("DetailRow")
+        frame.setMinimumHeight(48)
 
         row = QHBoxLayout(frame)
-        row.setContentsMargins(8, 8, 8, 8)
-        row.setSpacing(16)
+        row.setContentsMargins(6, 6, 6, 6)
+        row.setSpacing(12)
 
         symbol = QLabel(icon)
         symbol.setObjectName("RowIcon")
-        symbol.setFixedWidth(28)
+        symbol.setFixedSize(30, 30)
         symbol.setAlignment(Qt.AlignCenter)
 
         name = QLabel(label)
         name.setObjectName("RowLabel")
-        name.setFixedWidth(190)
+        name.setFixedWidth(170)
 
         value = QLabel("—")
         value.setObjectName(
@@ -324,6 +504,7 @@ class CommercialAccountPage(QWidget):
             if badge
             else "RowValue"
         )
+        value.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         row.addWidget(symbol)
         row.addWidget(name)
@@ -360,6 +541,23 @@ class CommercialAccountPage(QWidget):
         self.status_value.setText("Actif  ✓")
         self.email_value.setText(user.email or "Non renseignée")
 
+        self.hero_role_value.setText(user.display_name or "Utilisateur")
+        self.metric_identity_value.setText(user.display_name or "Profil")
+        self.metric_identity_caption.setText(user.email or "E-mail non renseigné")
+
+        access_label = (
+            "Cloud"
+            if getattr(self.auth_service, "is_cloud", False)
+            else "Local"
+        )
+        self.hero_access_value.setText(f"{access_label.upper()}  •  {user.role}")
+        self.metric_access_value.setText(access_label)
+        self.metric_access_caption.setText(
+            "Synchronisé avec l'organisation"
+            if access_label == "Cloud"
+            else "Profil stocké sur cet appareil"
+        )
+
         record = self.auth_service.get_user_record(user.id) or {}
         last_login = record.get("last_login")
         self.login_value.setText(self._format_datetime(last_login))
@@ -372,14 +570,16 @@ class CommercialAccountPage(QWidget):
         if getattr(self.auth_service, "is_cloud", False):
             self.license_plan.setText("Licence Form@Prospect Cloud")
             self.license_status.setText("Gérée par votre organisation")
+            self.metric_license_value.setText("Cloud")
+            self.metric_license_caption.setText("Gérée par votre organisation")
         else:
             licence = self.auth_service.license_info()
-            self.license_plan.setText(
-                f"Licence {licence.get('plan', 'Pro')}"
-            )
-            self.license_status.setText(
-                f"Statut : {licence.get('status', 'Active')}"
-            )
+            plan = str(licence.get("plan", "Pro") or "Pro")
+            status = str(licence.get("status", "Active") or "Active")
+            self.license_plan.setText(f"Licence {plan}")
+            self.license_status.setText(f"Statut : {status}")
+            self.metric_license_value.setText(plan)
+            self.metric_license_caption.setText(f"Statut : {status}")
 
     def _refresh_commercial_organization(self, user) -> None:
         """Affiche uniquement le rattachement du compte Cloud connecté."""
@@ -625,27 +825,5 @@ class CommercialAccountPage(QWidget):
 
     @staticmethod
     def _style() -> str:
-        return f"""
-        QWidget#CommercialAccountPage {{ background: {PAGE_BG}; color: {TEXT}; }}
-        QLabel#PageTitle {{ font-size: 28px; font-weight: 900; color: #0F1F38; }}
-        QLabel#PageSubtitle {{ font-size: 13px; color: #64748B; }}
-        QFrame#AccountCard {{ background: white; border: 1px solid {BORDER}; border-radius: 14px; }}
-        QLabel#SectionTitle {{ color: {PRIMARY}; font-size: 18px; font-weight: 900; }}
-        QLabel#LargeAvatar {{ background: transparent; border: 4px solid white; border-radius: 87px; }}
-        QPushButton#PrimaryButton {{ min-height: 42px; padding: 0 18px; background: {PRIMARY}; color: white; border: none; border-radius: 9px; font-size: 13px; font-weight: 800; }}
-        QPushButton#PrimaryButton:hover {{ background: {PRIMARY_DARK}; }}
-        QPushButton#TextButton {{ color: #64748B; background: transparent; border: none; font-size: 11px; }}
-        QPushButton#TextButton:hover {{ color: #DC2626; text-decoration: underline; }}
-        QLabel#Hint {{ color: #64748B; font-size: 11px; line-height: 1.5; }}
-        QFrame#DetailRow {{ border: none; border-bottom: 1px solid #E8EDF4; background: transparent; }}
-        QLabel#RowIcon {{ color: #0F1F38; font-size: 21px; }}
-        QLabel#RowLabel {{ color: #334155; font-size: 13px; }}
-        QLabel#RowValue {{ color: #0F172A; font-size: 13px; font-weight: 700; }}
-        QLabel#BadgeValue {{ color: #0B65D8; background: #EAF3FF; border-radius: 7px; padding: 6px 10px; font-size: 12px; font-weight: 800; }}
-        QLabel#SuccessValue, QLabel#LicenseStatus {{ color: #16A34A; font-size: 13px; font-weight: 800; }}
-        QLabel#FeatureIcon {{ color: {PRIMARY}; background: #EAF3FF; border-radius: 10px; font-size: 24px; }}
-        QLabel#FeatureTitle {{ color: #0F172A; font-size: 14px; font-weight: 900; }}
-        QLabel#FeatureDescription {{ color: #64748B; font-size: 12px; }}
-        QPushButton#SecondaryButton {{ min-height: 40px; padding: 0 16px; background: white; color: {PRIMARY}; border: 1px solid {BORDER}; border-radius: 9px; font-size: 12px; font-weight: 800; }}
-        QPushButton#SecondaryButton:hover {{ border-color: {PRIMARY}; background: #F8FBFF; }}
-        """
+        palette = account_page_palette(get_theme_preference())
+        return commercial_account_stylesheet(palette)

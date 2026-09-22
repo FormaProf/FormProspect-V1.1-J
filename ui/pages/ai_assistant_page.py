@@ -8,10 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.application_state import ApplicationState
-from core.premium_theme import (
-    BORDER, CARD, MUTED, NAVY, PAGE_BG, PRIMARY_BUTTON,
-    SECONDARY_BUTTON, SUCCESS, TEXT,
-)
+from core.theme_settings import get_theme_preference
+from ui.ai_premium_theme import assistant_page_palette, assistant_page_stylesheet
 from services.ai import AssistantService, CloudAssistantService
 from services.cloud_runtime import CloudRuntime
 from services.system.activity_service import ActivityService
@@ -25,111 +23,96 @@ class AIAssistantPage(QWidget):
         super().__init__()
         self.service = None
         self.current_prospect_id = None
-        self.setStyleSheet(f"background: {PAGE_BG};")
+        self._theme_mode = get_theme_preference()
+        self._palette = assistant_page_palette(self._theme_mode)
+        self.setObjectName("AIAssistantRoot")
         self._build_ui()
+        self._apply_visual_theme()
 
-    def _card(self) -> QFrame:
+    @staticmethod
+    def _card() -> QFrame:
         frame = QFrame()
-        frame.setObjectName("AiCard")
-        frame.setStyleSheet(
-            f"QFrame#AiCard {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 16px; }}"
-        )
+        frame.setProperty("aiCard", True)
         return frame
+
+    def _apply_visual_theme(self) -> None:
+        """Rafraîchit uniquement la couche visuelle, sans appel métier ni Cloud."""
+        self._theme_mode = get_theme_preference()
+        self._palette = assistant_page_palette(self._theme_mode)
+        self.setStyleSheet(assistant_page_stylesheet(self._palette))
+
+    def showEvent(self, event):
+        if get_theme_preference() != self._theme_mode:
+            self._apply_visual_theme()
+        super().showEvent(event)
 
     def _build_ui(self):
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
 
         scroll = QScrollArea()
+        scroll.setObjectName("AiPageScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(
-            "QScrollArea{border:none;background:transparent;}"
-            "QScrollBar:vertical{background:transparent;width:10px;margin:4px 2px;}"
-            "QScrollBar::handle:vertical{background:#CBD5E1;min-height:40px;border-radius:5px;}"
-            "QScrollBar::handle:vertical:hover{background:#94A3B8;}"
-            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
-        )
 
         content = QWidget()
-        content.setStyleSheet(f"background:{PAGE_BG};")
+        content.setObjectName("AiViewport")
         root = QVBoxLayout(content)
-        root.setContentsMargins(30, 24, 30, 34)
-        root.setSpacing(16)
+        root.setContentsMargins(24, 20, 24, 28)
+        root.setSpacing(14)
 
-        # HERO
+        # ------------------------------------------------------------------
+        # HERO — identité IA, statut et promesse
+        # ------------------------------------------------------------------
         hero = QFrame()
         hero.setObjectName("AiHero")
-        hero.setMinimumHeight(162)
-        hero.setStyleSheet(
-            "QFrame#AiHero{"
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            "stop:0 #071C35, stop:0.48 #0B2A52, stop:1 #145A91);"
-            "border:1px solid #173F6D;border-radius:24px;"
-            "}"
-            "QLabel{background:transparent;border:none;}"
-        )
+        hero.setMinimumHeight(142)
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(26, 22, 24, 22)
-        hero_layout.setSpacing(22)
+        hero_layout.setContentsMargins(24, 19, 22, 19)
+        hero_layout.setSpacing(18)
 
         orb = QFrame()
         orb.setObjectName("AiOrb")
-        orb.setFixedSize(92, 92)
-        orb.setStyleSheet(
-            "QFrame#AiOrb{"
-            "background:qradialgradient(cx:.35,cy:.28,radius:.82,"
-            "stop:0 #6BC2FF, stop:.28 #338CE4, stop:.72 #145A91, stop:1 #0B2A52);"
-            "border:1px solid #75C8FF;border-radius:46px;"
-            "}"
-        )
+        orb.setFixedSize(76, 76)
         orb_layout = QVBoxLayout(orb)
         orb_layout.setContentsMargins(0, 0, 0, 0)
         ai_glyph = QLabel("✦")
+        ai_glyph.setObjectName("AiOrbGlyph")
         ai_glyph.setAlignment(Qt.AlignCenter)
-        ai_glyph.setStyleSheet(
-            "color:#FFFFFF;font-size:38px;font-weight:900;background:transparent;"
-        )
         orb_layout.addWidget(ai_glyph)
 
         hero_text = QVBoxLayout()
-        hero_text.setSpacing(4)
-        eyebrow = QLabel("FORM@PROSPECT  •  INTELLIGENCE COMMERCIALE")
-        eyebrow.setStyleSheet(
-            "color:#79C7FF;font-size:9px;font-weight:900;letter-spacing:1.4px;"
-        )
-        hero_title = QLabel("Votre copilote commercial")
-        hero_title.setStyleSheet("color:#FFFFFF;font-size:31px;font-weight:900;")
+        hero_text.setSpacing(3)
+        eyebrow = QLabel("AI COMMAND CENTER  •  INTELLIGENCE COMMERCIALE")
+        eyebrow.setObjectName("AiHeroEyebrow")
+        hero_title = QLabel("Assistant IA")
+        hero_title.setObjectName("AiHeroTitle")
         hero_subtitle = QLabel(
-            "Détectez les meilleures opportunités, préparez chaque échange "
-            "et transformez votre CRM en plan d'action."
+            "Priorisez les meilleures opportunités, préparez chaque échange et "
+            "transformez le contexte CRM en actions commerciales concrètes."
         )
+        hero_subtitle.setObjectName("AiHeroSubtitle")
         hero_subtitle.setWordWrap(True)
-        hero_subtitle.setStyleSheet("color:#C9D8EA;font-size:12px;")
         hero_text.addWidget(eyebrow)
         hero_text.addWidget(hero_title)
         hero_text.addWidget(hero_subtitle)
 
         hero_status = QVBoxLayout()
-        hero_status.setSpacing(8)
+        hero_status.setSpacing(7)
         live_badge = QLabel("●  COPILOTE ACTIF")
+        live_badge.setObjectName("AiLiveBadge")
         live_badge.setAlignment(Qt.AlignCenter)
-        live_badge.setFixedHeight(34)
-        live_badge.setMinimumWidth(160)
-        live_badge.setStyleSheet(
-            "background:#E9FFF3;color:#087A45;border:1px solid #A7F3D0;"
-            "border-radius:12px;padding:0 13px;font-size:10px;font-weight:900;"
-        )
-        privacy = QLabel("🔒  Analyse interne\nAucune donnée envoyée à une IA externe")
+        live_badge.setFixedHeight(32)
+        live_badge.setMinimumWidth(158)
+
+        privacy = QLabel("ANALYSE INTERNE\nAucune donnée envoyée à une IA externe")
+        privacy.setObjectName("AiPrivacyBadge")
         privacy.setAlignment(Qt.AlignCenter)
         privacy.setWordWrap(True)
-        privacy.setMinimumWidth(235)
-        privacy.setStyleSheet(
-            "color:#D7E7F8;background:rgba(255,255,255,0.08);"
-            "border:1px solid rgba(255,255,255,0.15);border-radius:13px;"
-            "padding:10px 13px;font-size:10px;font-weight:750;"
-        )
+        privacy.setMinimumWidth(220)
+
         hero_status.addWidget(live_badge)
         hero_status.addWidget(privacy)
 
@@ -139,164 +122,157 @@ class AIAssistantPage(QWidget):
         root.addWidget(hero)
 
         self.empty_label = QLabel("Ouvrez un projet pour activer le copilote commercial.")
+        self.empty_label.setObjectName("AiEmptyState")
         self.empty_label.setAlignment(Qt.AlignCenter)
-        self.empty_label.setMinimumHeight(110)
-        self.empty_label.setStyleSheet(
-            f"background:#FFFFFF;color:{MUTED};border:1px dashed #C9D7E6;"
-            "border-radius:18px;font-size:13px;"
-        )
+        self.empty_label.setWordWrap(True)
+        self.empty_label.setMinimumHeight(96)
         root.addWidget(self.empty_label)
 
         self.main_content = QWidget()
+        self.main_content.setObjectName("AiMainContent")
         main_layout = QVBoxLayout(self.main_content)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(16)
+        main_layout.setSpacing(14)
 
-        # KPI executive
+        # ------------------------------------------------------------------
+        # KPI — lecture exécutive compacte
+        # ------------------------------------------------------------------
         self.kpi_grid = QGridLayout()
-        self.kpi_grid.setHorizontalSpacing(12)
-        self.kpi_grid.setVerticalSpacing(12)
+        self.kpi_grid.setHorizontalSpacing(10)
+        self.kpi_grid.setVerticalSpacing(10)
         self.kpi_labels = {}
 
         metrics = [
-            ("priorities", "Prioritaires", "🔥", "À traiter maintenant", "#FF9A3C", "#FFF5EB"),
-            ("due_today", "Aujourd'hui", "📅", "Actions planifiées", "#338CE4", "#EEF6FF"),
-            ("overdue", "En retard", "⚠", "Relances à reprendre", "#EF4444", "#FFF1F2"),
-            ("quality", "Qualité CRM", "✦", "Complétude des contacts", "#8B5CF6", "#F5F3FF"),
+            ("priorities", "Prioritaires", "!", "À traiter maintenant", "amber"),
+            ("due_today", "Aujourd'hui", "↗", "Actions planifiées", "blue"),
+            ("overdue", "En retard", "!", "Relances à reprendre", "red"),
+            ("quality", "Qualité CRM", "✦", "Complétude des contacts", "violet"),
         ]
 
-        for column, (key, label, icon, caption, accent, soft) in enumerate(metrics):
+        for column, (key, label, icon, caption, tone) in enumerate(metrics):
             card = QFrame()
             card.setObjectName(f"AiMetric_{key}")
-            card.setMinimumHeight(116)
-            card.setStyleSheet(
-                f"QFrame#AiMetric_{key}{{background:#FFFFFF;"
-                "border:1px solid #E4EBF4;border-radius:18px;}"
-                "QLabel{background:transparent;border:none;}"
-            )
+            card.setProperty("aiMetric", True)
+            card.setProperty("aiTone", tone)
+            card.setMinimumHeight(100)
             layout = QVBoxLayout(card)
-            layout.setContentsMargins(16, 14, 16, 13)
-            layout.setSpacing(5)
+            layout.setContentsMargins(14, 12, 14, 11)
+            layout.setSpacing(4)
 
             top_row = QHBoxLayout()
+            top_row.setSpacing(7)
             icon_box = QLabel(icon)
-            icon_box.setFixedSize(32, 32)
+            icon_box.setProperty("aiMetricIcon", True)
+            icon_box.setProperty("aiTone", tone)
+            icon_box.setFixedSize(29, 29)
             icon_box.setAlignment(Qt.AlignCenter)
-            icon_box.setStyleSheet(
-                f"background:{soft};color:{accent};border:none;"
-                "border-radius:10px;font-size:14px;font-weight:900;"
-            )
+
             metric_name = QLabel(label)
-            metric_name.setStyleSheet("color:#53657C;font-size:10px;font-weight:850;")
+            metric_name.setProperty("aiMetricName", True)
             top_row.addWidget(icon_box)
             top_row.addWidget(metric_name)
             top_row.addStretch()
 
             value = QLabel("0")
-            value.setStyleSheet("color:#081A31;font-size:28px;font-weight:900;")
+            value.setProperty("aiMetricValue", True)
             foot = QLabel(caption)
-            foot.setStyleSheet("color:#94A3B8;font-size:9px;")
+            foot.setProperty("aiMetricCaption", True)
+
             accent_line = QFrame()
+            accent_line.setProperty("aiMetricAccent", True)
+            accent_line.setProperty("aiTone", tone)
             accent_line.setFixedHeight(3)
-            accent_line.setStyleSheet(f"background:{accent};border:none;border-radius:1px;")
 
             layout.addLayout(top_row)
             layout.addWidget(value)
             layout.addWidget(foot)
             layout.addWidget(accent_line)
+
             self.kpi_grid.addWidget(card, 0, column)
             self.kpi_labels[key] = value
 
         main_layout.addLayout(self.kpi_grid)
 
-        # Command center
+        # ------------------------------------------------------------------
+        # COMMAND CENTER — radar d'opportunités + cockpit prospect
+        # ------------------------------------------------------------------
         split = QSplitter(Qt.Horizontal)
+        split.setObjectName("AiCommandSplitter")
         split.setChildrenCollapsible(False)
-        split.setHandleWidth(12)
-        split.setStyleSheet("QSplitter::handle{background:transparent;}")
+        split.setHandleWidth(10)
 
         # Opportunity radar
         left = QFrame()
         left.setObjectName("AiRadarCard")
-        left.setStyleSheet(
-            "QFrame#AiRadarCard{background:#FFFFFF;border:1px solid #E4EBF4;"
-            "border-radius:20px;}QLabel{background:transparent;border:none;}"
-        )
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(18, 17, 18, 18)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(16, 15, 16, 16)
+        left_layout.setSpacing(9)
 
         left_top = QHBoxLayout()
         left_titles = QVBoxLayout()
-        left_titles.setSpacing(2)
+        left_titles.setSpacing(1)
+
         section = QLabel("OPPORTUNITY RADAR")
-        section.setStyleSheet(
-            "color:#338CE4;font-size:9px;font-weight:900;letter-spacing:1.2px;"
-        )
+        section.setProperty("aiOverline", True)
         left_title = QLabel("Prospects à fort potentiel")
-        left_title.setStyleSheet("color:#0B1220;font-size:18px;font-weight:900;")
-        left_sub = QLabel("Le copilote classe automatiquement les opportunités à traiter.")
+        left_title.setProperty("aiSectionTitle", True)
+        left_sub = QLabel(
+            "Le copilote classe les opportunités pour concentrer l'effort commercial."
+        )
+        left_sub.setProperty("aiSectionSubtitle", True)
         left_sub.setWordWrap(True)
-        left_sub.setStyleSheet("color:#7A8A9E;font-size:10px;")
+
         left_titles.addWidget(section)
         left_titles.addWidget(left_title)
         left_titles.addWidget(left_sub)
 
         radar_badge = QLabel("LIVE")
+        radar_badge.setObjectName("AiRadarLive")
         radar_badge.setAlignment(Qt.AlignCenter)
-        radar_badge.setFixedSize(48, 26)
-        radar_badge.setStyleSheet(
-            "background:#E9FFF3;color:#087A45;border:1px solid #A7F3D0;"
-            "border-radius:9px;font-size:9px;font-weight:900;"
-        )
+        radar_badge.setFixedSize(48, 24)
+
         left_top.addLayout(left_titles, 1)
         left_top.addWidget(radar_badge, 0, Qt.AlignTop)
         left_layout.addLayout(left_top)
 
         search_shell = QFrame()
         search_shell.setObjectName("AiSearchShell")
-        search_shell.setStyleSheet(
-            "QFrame#AiSearchShell{background:#F7FAFE;border:1px solid #DDE7F1;"
-            "border-radius:12px;}"
-        )
         search_layout = QHBoxLayout(search_shell)
-        search_layout.setContentsMargins(10, 0, 9, 0)
-        search_layout.setSpacing(7)
+        search_layout.setContentsMargins(10, 0, 8, 0)
+        search_layout.setSpacing(6)
+
         search_icon = QLabel("⌕")
-        search_icon.setStyleSheet(
-            "color:#338CE4;font-size:18px;font-weight:900;background:transparent;"
-        )
+        search_icon.setObjectName("AiSearchIcon")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Rechercher entreprise, ville, téléphone ou e-mail…")
-        self.search_input.setClearButtonEnabled(True)
-        self.search_input.setMinimumHeight(40)
-        self.search_input.setStyleSheet(
-            "QLineEdit{background:transparent;color:#172033;border:none;"
-            "font-size:11px;padding:0 3px;}"
+        self.search_input.setObjectName("AiSearchInput")
+        self.search_input.setPlaceholderText(
+            "Rechercher entreprise, ville, téléphone ou e-mail…"
         )
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setMinimumHeight(38)
         self.search_input.textChanged.connect(self._load_prospects)
+
         search_layout.addWidget(search_icon)
         search_layout.addWidget(self.search_input, 1)
         left_layout.addWidget(search_shell)
 
         controls = QHBoxLayout()
-        controls.setSpacing(8)
-        top_label = QLabel("TOP")
-        top_label.setStyleSheet("color:#7A8A9E;font-size:9px;font-weight:850;")
+        controls.setSpacing(7)
+        top_label = QLabel("AFFICHER")
+        top_label.setProperty("aiControlLabel", True)
+
         self.limit_combo = QComboBox()
+        self.limit_combo.setObjectName("AiLimitCombo")
         self.limit_combo.addItems(["10", "25", "50", "100"])
         self.limit_combo.setCurrentText("25")
-        self.limit_combo.setFixedWidth(72)
-        self.limit_combo.setMinimumHeight(32)
-        self.limit_combo.setStyleSheet(
-            "QComboBox{background:#FFFFFF;color:#334155;border:1px solid #DCE5EF;"
-            "border-radius:9px;padding:4px 8px;font-size:10px;font-weight:800;}"
-            "QComboBox QAbstractItemView{background:white;color:#172033;"
-            "selection-background-color:#EAF4FF;selection-color:#0B2A52;}"
-        )
+        self.limit_combo.setFixedWidth(76)
+        self.limit_combo.setMinimumHeight(31)
         self.limit_combo.currentTextChanged.connect(self._load_prospects)
+
         self.results_label = QLabel("")
-        self.results_label.setStyleSheet("color:#8A98AA;font-size:9px;")
+        self.results_label.setObjectName("AiResultsLabel")
+        self.results_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
         controls.addWidget(top_label)
         controls.addWidget(self.limit_combo)
         controls.addStretch()
@@ -304,7 +280,10 @@ class AIAssistantPage(QWidget):
         left_layout.addLayout(controls)
 
         self.prospect_table = QTableWidget(0, 4)
-        self.prospect_table.setHorizontalHeaderLabels(["Entreprise", "Score", "Niveau", "Contact"])
+        self.prospect_table.setObjectName("AiProspectTable")
+        self.prospect_table.setHorizontalHeaderLabels(
+            ["Entreprise", "Score", "Niveau", "Contact"]
+        )
         self.prospect_table.verticalHeader().setVisible(False)
         self.prospect_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.prospect_table.setSelectionMode(QTableWidget.SingleSelection)
@@ -312,93 +291,66 @@ class AIAssistantPage(QWidget):
         self.prospect_table.setShowGrid(False)
         self.prospect_table.setAlternatingRowColors(False)
         self.prospect_table.setWordWrap(False)
-        self.prospect_table.setMinimumHeight(430)
+        self.prospect_table.setMinimumHeight(410)
         self.prospect_table.setFocusPolicy(Qt.NoFocus)
         self.prospect_table.itemSelectionChanged.connect(self._on_selection)
+
         header = self.prospect_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.prospect_table.setStyleSheet(
-            "QTableWidget{background:#FFFFFF;color:#172033;border:1px solid #E4EBF4;"
-            "border-radius:13px;selection-background-color:#E9F4FF;"
-            "selection-color:#0B2A52;outline:none;font-size:10px;}"
-            "QHeaderView::section{background:#081F3D;color:#FFFFFF;border:none;"
-            "border-right:1px solid #153B67;padding:11px 7px;font-size:9px;font-weight:900;}"
-            "QTableWidget::item{background:#FFFFFF;border:none;"
-            "border-bottom:1px solid #EFF3F7;padding:10px 8px;}"
-            "QTableWidget::item:selected{background:#E9F4FF;color:#0B2A52;"
-            "border-left:3px solid #338CE4;}"
-        )
         left_layout.addWidget(self.prospect_table, 1)
 
-        # Copilot console
+        # Prospect cockpit
         right = QFrame()
         right.setObjectName("AiConsole")
-        right.setStyleSheet(
-            "QFrame#AiConsole{background:#FFFFFF;border:1px solid #DCE7F3;"
-            "border-radius:20px;}QLabel{background:transparent;border:none;}"
-        )
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
         prospect_hero = QFrame()
         prospect_hero.setObjectName("ProspectHero")
-        prospect_hero.setStyleSheet(
-            "QFrame#ProspectHero{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #081F3D, stop:1 #123F70);border:none;"
-            "border-top-left-radius:19px;border-top-right-radius:19px;}"
-            "QLabel{background:transparent;border:none;}"
-        )
         prospect_hero_layout = QVBoxLayout(prospect_hero)
-        prospect_hero_layout.setContentsMargins(18, 15, 18, 15)
-        prospect_hero_layout.setSpacing(4)
+        prospect_hero_layout.setContentsMargins(17, 14, 17, 14)
+        prospect_hero_layout.setSpacing(3)
+
         right_section = QLabel("PROSPECT INTELLIGENCE")
-        right_section.setStyleSheet(
-            "color:#79C7FF;font-size:9px;font-weight:900;letter-spacing:1.1px;"
-        )
+        right_section.setObjectName("AiProspectEyebrow")
         self.selected_title = QLabel("Sélectionnez un prospect")
+        self.selected_title.setObjectName("AiSelectedTitle")
         self.selected_title.setWordWrap(True)
-        self.selected_title.setStyleSheet("color:#FFFFFF;font-size:21px;font-weight:900;")
-        self.selected_meta = QLabel("Le copilote préparera une recommandation personnalisée.")
+        self.selected_meta = QLabel(
+            "Le copilote préparera une recommandation personnalisée."
+        )
+        self.selected_meta.setObjectName("AiSelectedMeta")
         self.selected_meta.setWordWrap(True)
-        self.selected_meta.setStyleSheet("color:#B7CADF;font-size:10px;")
+
         prospect_hero_layout.addWidget(right_section)
         prospect_hero_layout.addWidget(self.selected_title)
         prospect_hero_layout.addWidget(self.selected_meta)
         right_layout.addWidget(prospect_hero)
 
         console_body = QWidget()
-        console_body.setStyleSheet("background:transparent;")
+        console_body.setObjectName("AiConsoleBody")
         console_layout = QVBoxLayout(console_body)
-        console_layout.setContentsMargins(16, 14, 16, 16)
-        console_layout.setSpacing(11)
+        console_layout.setContentsMargins(14, 12, 14, 14)
+        console_layout.setSpacing(10)
 
         self.copilot_card = QFrame()
         self.copilot_card.setObjectName("CopilotSummary")
-        self.copilot_card.setStyleSheet(
-            "QFrame#CopilotSummary{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            "stop:0 #EEF7FF, stop:1 #F7FBFF);border:1px solid #BFDDFC;"
-            "border-radius:15px;}QLabel{background:transparent;border:none;}"
-        )
         copilot_layout = QVBoxLayout(self.copilot_card)
-        copilot_layout.setContentsMargins(14, 12, 14, 13)
-        copilot_layout.setSpacing(7)
+        copilot_layout.setContentsMargins(13, 11, 13, 12)
+        copilot_layout.setSpacing(6)
 
         synth_head = QHBoxLayout()
         copilot_caption = QLabel("✦  SYNTHÈSE DU COPILOTE")
-        copilot_caption.setStyleSheet(
-            "color:#1473C9;font-size:9px;font-weight:900;letter-spacing:.8px;"
-        )
+        copilot_caption.setObjectName("AiCopilotCaption")
         confidence_chip = QLabel("ANALYSE LIVE")
+        confidence_chip.setObjectName("AiAnalysisChip")
         confidence_chip.setAlignment(Qt.AlignCenter)
-        confidence_chip.setFixedHeight(24)
-        confidence_chip.setStyleSheet(
-            "background:#FFFFFF;color:#338CE4;border:1px solid #CFE4F8;"
-            "border-radius:8px;padding:0 8px;font-size:8px;font-weight:900;"
-        )
+        confidence_chip.setFixedHeight(23)
+
         synth_head.addWidget(copilot_caption)
         synth_head.addStretch()
         synth_head.addWidget(confidence_chip)
@@ -407,9 +359,14 @@ class AIAssistantPage(QWidget):
         self.copilot_priority = QLabel("Priorité : —")
         self.copilot_objective = QLabel("Objectif : sélectionnez un prospect")
         self.copilot_action = QLabel("Action conseillée : —")
-        for label in (self.copilot_priority, self.copilot_objective, self.copilot_action):
+        for label in (
+            self.copilot_priority,
+            self.copilot_objective,
+            self.copilot_action,
+        ):
+            label.setProperty("aiCopilotLine", True)
             label.setWordWrap(True)
-            label.setStyleSheet("color:#172033;font-size:10px;font-weight:750;")
+
         copilot_layout.addWidget(self.copilot_priority)
         copilot_layout.addWidget(self.copilot_objective)
         copilot_layout.addWidget(self.copilot_action)
@@ -417,45 +374,38 @@ class AIAssistantPage(QWidget):
 
         main_cta = QHBoxLayout()
         main_cta.setSpacing(8)
+
         open_copilot_btn = QPushButton("✦  Ouvrir le copilote")
+        open_copilot_btn.setProperty("aiDarkButton", True)
         open_copilot_btn.setCursor(Qt.PointingHandCursor)
-        open_copilot_btn.setMinimumHeight(44)
-        open_copilot_btn.setStyleSheet(
-            "QPushButton{background:#081F3D;color:#FFFFFF;border:none;border-radius:11px;"
-            "padding:0 16px;font-size:11px;font-weight:900;}"
-            "QPushButton:hover{background:#123F70;}"
-        )
+        open_copilot_btn.setMinimumHeight(42)
         open_copilot_btn.clicked.connect(self.open_prospect_copilot)
 
-        qualification_btn = QPushButton("🎯  Qualification automatique")
+        qualification_btn = QPushButton("Qualification automatique")
+        qualification_btn.setProperty("aiPrimaryButton", True)
         qualification_btn.setCursor(Qt.PointingHandCursor)
-        qualification_btn.setMinimumHeight(44)
-        qualification_btn.setStyleSheet(
-            "QPushButton{background:#338CE4;color:#FFFFFF;border:none;border-radius:11px;"
-            "padding:0 16px;font-size:11px;font-weight:900;}"
-            "QPushButton:hover{background:#267FD6;}"
-            "QPushButton:pressed{background:#1E6EBB;}"
-        )
+        qualification_btn.setMinimumHeight(42)
         qualification_btn.clicked.connect(self.open_automatic_qualification)
+
         main_cta.addWidget(open_copilot_btn, 1)
         main_cta.addWidget(qualification_btn, 1)
         console_layout.addLayout(main_cta)
 
         tools_shell = QFrame()
         tools_shell.setObjectName("AiToolsShell")
-        tools_shell.setStyleSheet(
-            "QFrame#AiToolsShell{background:#F8FBFF;border:1px solid #E4EBF4;"
-            "border-radius:15px;}QLabel{background:transparent;border:none;}"
-        )
         tools_box = QVBoxLayout(tools_shell)
-        tools_box.setContentsMargins(12, 11, 12, 12)
-        tools_box.setSpacing(9)
+        tools_box.setContentsMargins(11, 10, 11, 11)
+        tools_box.setSpacing(8)
 
+        tools_head = QHBoxLayout()
         tools_title = QLabel("OUTILS INTELLIGENTS")
-        tools_title.setStyleSheet(
-            "color:#526276;font-size:10px;font-weight:900;letter-spacing:.9px;"
-        )
-        tools_box.addWidget(tools_title)
+        tools_title.setProperty("aiToolbarTitle", True)
+        tools_hint = QLabel("Choisissez une action pour le prospect sélectionné")
+        tools_hint.setProperty("aiToolbarHint", True)
+        tools_head.addWidget(tools_title)
+        tools_head.addStretch()
+        tools_head.addWidget(tools_hint)
+        tools_box.addLayout(tools_head)
 
         families = QGridLayout()
         families.setHorizontalSpacing(8)
@@ -463,64 +413,62 @@ class AIAssistantPage(QWidget):
 
         family_specs = [
             (
-                "ANALYSER", "✦", "#EEF6FF", "#1473C9",
+                "ANALYSER", "✦", "blue",
                 [
-                    ("🎯  Qualification", self.open_automatic_qualification),
-                    ("📊  Expliquer le score", self.explain_score),
-                    ("📚  Knowledge Engine", self.show_knowledge_overview),
+                    ("Qualification", self.open_automatic_qualification),
+                    ("Expliquer le score", self.explain_score),
+                    ("Knowledge Engine", self.show_knowledge_overview),
                 ],
             ),
             (
-                "PRÉPARER", "☎", "#FFF7ED", "#C56A14",
+                "PRÉPARER", "☎", "amber",
                 [
-                    ("📞  Préparer l'appel", self.prepare_call),
-                    ("❓  Questions découverte", self.prepare_call),
-                    ("🛡  Traiter objections", self.generate_objections),
+                    ("Préparer l'appel", self.prepare_call),
+                    ("Questions découverte", self.prepare_call),
+                    ("Traiter les objections", self.generate_objections),
                 ],
             ),
             (
-                "COMMUNIQUER", "✉", "#F5F3FF", "#7C3AED",
+                "COMMUNIQUER", "✉", "violet",
                 [
-                    ("📝  Script Form@Prof", self.generate_call_script),
-                    ("✉  E-mail Form@Prof", self.generate_email),
+                    ("Script Form@Prof", self.generate_call_script),
+                    ("E-mail Form@Prof", self.generate_email),
                 ],
             ),
             (
-                "SUIVRE", "↗", "#ECFDF5", "#0F8A59",
+                "SUIVRE", "↗", "green",
                 [
-                    ("➡  Prochaine action", self.recommend_action),
-                    ("🔁  Plan de relance", self.generate_follow_up_plan),
-                    ("🧠  Mémoire commerciale", self.open_commercial_memory),
-                    ("＋  Ajouter mémoire", self.add_commercial_memory),
+                    ("Prochaine action", self.recommend_action),
+                    ("Plan de relance", self.generate_follow_up_plan),
+                    ("Mémoire commerciale", self.open_commercial_memory),
+                    ("Ajouter une mémoire", self.add_commercial_memory),
                 ],
             ),
         ]
 
-        for family_index, (family_name, family_icon, soft, accent, buttons) in enumerate(family_specs):
+        for family_index, (family_name, family_icon, tone, buttons) in enumerate(
+            family_specs
+        ):
             family = QFrame()
-            family.setObjectName(f"AiFamily_{family_index}")
-            family.setStyleSheet(
-                f"QFrame#AiFamily_{family_index}{{background:#FFFFFF;"
-                "border:1px solid #E4EBF4;border-radius:12px;}"
-                "QLabel{background:transparent;border:none;}"
-            )
+            family.setProperty("aiFamilyCard", True)
+            family.setProperty("aiFamilyTone", tone)
             family_layout = QVBoxLayout(family)
-            family_layout.setContentsMargins(10, 9, 10, 10)
-            family_layout.setSpacing(7)
+            family_layout.setContentsMargins(9, 8, 9, 9)
+            family_layout.setSpacing(6)
 
             family_head = QHBoxLayout()
-            family_head.setSpacing(7)
+            family_head.setSpacing(6)
+
             family_badge = QLabel(family_icon)
-            family_badge.setFixedSize(26, 26)
+            family_badge.setProperty("aiFamilyBadge", True)
+            family_badge.setProperty("aiFamilyTone", tone)
+            family_badge.setFixedSize(25, 25)
             family_badge.setAlignment(Qt.AlignCenter)
-            family_badge.setStyleSheet(
-                f"background:{soft};color:{accent};border:none;border-radius:8px;"
-                "font-size:12px;font-weight:900;"
-            )
+
             family_label = QLabel(family_name)
-            family_label.setStyleSheet(
-                f"color:{accent};font-size:10px;font-weight:900;letter-spacing:.7px;"
-            )
+            family_label.setProperty("aiFamilyLabel", True)
+            family_label.setProperty("aiFamilyTone", tone)
+
             family_head.addWidget(family_badge)
             family_head.addWidget(family_label)
             family_head.addStretch()
@@ -528,19 +476,13 @@ class AIAssistantPage(QWidget):
 
             for caption, callback in buttons:
                 button = QPushButton(caption)
+                button.setProperty("aiToolButton", True)
                 button.setCursor(Qt.PointingHandCursor)
-                button.setMinimumHeight(38)
-                button.setStyleSheet(
-                    "QPushButton{background:#F9FBFD;color:#173A60;"
-                    "border:1px solid #E6EDF5;border-radius:9px;"
-                    "padding:0 11px;font-size:10px;font-weight:850;text-align:left;}"
-                    "QPushButton:hover{background:#EEF7FF;color:#0D68BA;"
-                    "border-color:#A7CEF1;}"
-                    "QPushButton:pressed{background:#DFEFFD;}"
-                )
+                button.setMinimumHeight(34)
                 button.clicked.connect(callback)
                 family_layout.addWidget(button)
 
+            family_layout.addStretch()
             families.addWidget(family, family_index // 2, family_index % 2)
 
         tools_box.addLayout(families)
@@ -548,60 +490,52 @@ class AIAssistantPage(QWidget):
 
         output_card = QFrame()
         output_card.setObjectName("AiOutputCard")
-        output_card.setStyleSheet(
-            "QFrame#AiOutputCard{background:#FFFFFF;border:1px solid #DDE7F1;"
-            "border-radius:15px;}QLabel{background:transparent;border:none;}"
-        )
         output_layout = QVBoxLayout(output_card)
-        output_layout.setContentsMargins(12, 11, 12, 12)
-        output_layout.setSpacing(8)
+        output_layout.setContentsMargins(11, 10, 11, 11)
+        output_layout.setSpacing(7)
 
         output_head = QHBoxLayout()
         output_identity = QHBoxLayout()
+        output_identity.setSpacing(8)
+
         output_orb = QLabel("✦")
-        output_orb.setFixedSize(32, 32)
+        output_orb.setObjectName("AiOutputOrb")
+        output_orb.setFixedSize(30, 30)
         output_orb.setAlignment(Qt.AlignCenter)
-        output_orb.setStyleSheet(
-            "background:#0B2A52;color:white;border-radius:10px;font-size:15px;font-weight:900;"
-        )
+
         output_titles = QVBoxLayout()
         output_titles.setSpacing(0)
         output_title = QLabel("RÉPONSE DU COPILOTE")
-        output_title.setStyleSheet(
-            "color:#0B2A52;font-size:11px;font-weight:900;letter-spacing:.7px;"
+        output_title.setObjectName("AiOutputTitle")
+        output_subtitle = QLabel(
+            "Analyse structurée • recommandation • argumentaire"
         )
-        output_subtitle = QLabel("Analyse structurée • recommandation • argumentaire")
-        output_subtitle.setStyleSheet("color:#7A8A9E;font-size:10px;font-weight:650;")
+        output_subtitle.setObjectName("AiOutputSubtitle")
         output_titles.addWidget(output_title)
         output_titles.addWidget(output_subtitle)
+
         output_identity.addWidget(output_orb)
         output_identity.addLayout(output_titles)
 
         copy_button = QPushButton("⧉  Copier")
+        copy_button.setProperty("aiSecondaryButton", True)
         copy_button.setCursor(Qt.PointingHandCursor)
-        copy_button.setMinimumHeight(30)
-        copy_button.setStyleSheet(
-            "QPushButton{background:#F8FBFF;color:#334155;border:1px solid #DCE5EF;"
-            "border-radius:9px;padding:0 12px;font-size:10px;font-weight:850;}"
-            "QPushButton:hover{background:#EAF4FF;color:#1473C9;border-color:#AFCFF0;}"
-        )
+        copy_button.setMinimumHeight(29)
         copy_button.clicked.connect(self.copy_output)
+
         output_head.addLayout(output_identity)
         output_head.addStretch()
         output_head.addWidget(copy_button)
 
         self.output = QTextEdit()
+        self.output.setObjectName("AiOutput")
         self.output.setReadOnly(True)
         self.output.setPlaceholderText(
             "Choisissez une action : le copilote affichera ici son analyse, "
             "son script ou sa recommandation…"
         )
-        self.output.setMinimumHeight(210)
-        self.output.setStyleSheet(
-            "QTextEdit{background:#F8FBFE;color:#172033;border:1px solid #E4EBF4;"
-            "border-radius:12px;padding:15px;font-size:12px;"
-            "selection-background-color:#DDEEFF;}"
-        )
+        self.output.setMinimumHeight(215)
+
         output_layout.addLayout(output_head)
         output_layout.addWidget(self.output, 1)
         console_layout.addWidget(output_card, 1)
@@ -609,69 +543,51 @@ class AIAssistantPage(QWidget):
 
         split.addWidget(left)
         split.addWidget(right)
-        split.setSizes([500, 650])
+        split.setSizes([480, 680])
         main_layout.addWidget(split, 1)
 
-        # Intelligence feed
+        # ------------------------------------------------------------------
+        # FEED — priorités opérationnelles et historique
+        # ------------------------------------------------------------------
         bottom = QSplitter(Qt.Horizontal)
+        bottom.setObjectName("AiFeedSplitter")
         bottom.setChildrenCollapsible(False)
-        bottom.setHandleWidth(12)
-        bottom.setStyleSheet("QSplitter::handle{background:transparent;}")
+        bottom.setHandleWidth(10)
 
         insight_card = QFrame()
         insight_card.setObjectName("AiInsightCard")
-        insight_card.setStyleSheet(
-            "QFrame#AiInsightCard{background:#FFFFFF;border:1px solid #E4EBF4;"
-            "border-radius:18px;}QLabel{background:transparent;border:none;}"
-        )
+        insight_card.setProperty("aiFeedCard", True)
         insight_layout = QVBoxLayout(insight_card)
-        insight_layout.setContentsMargins(17, 15, 17, 15)
-        insight_layout.setSpacing(7)
+        insight_layout.setContentsMargins(15, 13, 15, 14)
+        insight_layout.setSpacing(6)
+
         insight_overline = QLabel("PRIORITÉS OPÉRATIONNELLES")
-        insight_overline.setStyleSheet(
-            "color:#338CE4;font-size:9px;font-weight:900;letter-spacing:.9px;"
-        )
+        insight_overline.setProperty("aiOverline", True)
         insight_title = QLabel("Priorités recommandées")
-        insight_title.setStyleSheet("color:#0B1220;font-size:16px;font-weight:900;")
+        insight_title.setProperty("aiFeedTitle", True)
         self.insights_list = QListWidget()
+        self.insights_list.setObjectName("AiInsightsList")
         self.insights_list.setAlternatingRowColors(False)
-        self.insights_list.setStyleSheet(
-            "QListWidget{border:none;background:#F8FBFE;color:#172033;outline:none;"
-            "border-radius:12px;}"
-            "QListWidget::item{background:#FFFFFF;margin:4px 5px;padding:10px 10px;"
-            "border:1px solid #E6EDF5;border-radius:9px;}"
-            "QListWidget::item:selected{background:#EAF4FF;color:#0B2A52;"
-            "border-color:#BFDDFC;}"
-        )
+
         insight_layout.addWidget(insight_overline)
         insight_layout.addWidget(insight_title)
         insight_layout.addWidget(self.insights_list)
 
         history_card = QFrame()
         history_card.setObjectName("AiHistoryCard")
-        history_card.setStyleSheet(
-            "QFrame#AiHistoryCard{background:#FFFFFF;border:1px solid #E4EBF4;"
-            "border-radius:18px;}QLabel{background:transparent;border:none;}"
-        )
+        history_card.setProperty("aiFeedCard", True)
         history_layout = QVBoxLayout(history_card)
-        history_layout.setContentsMargins(17, 15, 17, 15)
-        history_layout.setSpacing(7)
+        history_layout.setContentsMargins(15, 13, 15, 14)
+        history_layout.setSpacing(6)
+
         history_overline = QLabel("ACTIVITY STREAM")
-        history_overline.setStyleSheet(
-            "color:#338CE4;font-size:9px;font-weight:900;letter-spacing:.9px;"
-        )
+        history_overline.setProperty("aiOverline", True)
         history_title = QLabel("Activité du copilote")
-        history_title.setStyleSheet("color:#0B1220;font-size:16px;font-weight:900;")
+        history_title.setProperty("aiFeedTitle", True)
         self.history_list = QListWidget()
+        self.history_list.setObjectName("AiHistoryList")
         self.history_list.itemClicked.connect(self._open_history)
-        self.history_list.setStyleSheet(
-            "QListWidget{border:none;background:#F8FBFE;color:#172033;outline:none;"
-            "border-radius:12px;}"
-            "QListWidget::item{background:#FFFFFF;margin:4px 5px;padding:10px 10px;"
-            "border:1px solid #E6EDF5;border-radius:9px;}"
-            "QListWidget::item:selected{background:#EAF4FF;color:#0B2A52;"
-            "border-color:#BFDDFC;}"
-        )
+
         history_layout.addWidget(history_overline)
         history_layout.addWidget(history_title)
         history_layout.addWidget(self.history_list)
@@ -679,7 +595,7 @@ class AIAssistantPage(QWidget):
         bottom.addWidget(insight_card)
         bottom.addWidget(history_card)
         bottom.setSizes([560, 560])
-        bottom.setMinimumHeight(235)
+        bottom.setMinimumHeight(220)
         main_layout.addWidget(bottom)
 
         root.addWidget(self.main_content)
@@ -857,50 +773,133 @@ class AIAssistantPage(QWidget):
         if not self._require_selection():
             return
 
+        p = assistant_page_palette(get_theme_preference())
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Ajouter une mémoire commerciale")
         dialog.setModal(True)
         dialog.resize(650, 520)
         dialog.setMinimumSize(610, 480)
         dialog.setStyleSheet(
-            "QDialog{background:#F5F8FC;}"
-            "QLabel{background:transparent;border:none;}"
+            f"""
+            QDialog {{
+                background:{p['page']};
+                color:{p['text']};
+            }}
+            QLabel {{
+                background:transparent;
+                border:none;
+            }}
+            QFrame#MemoryHeader {{
+                background:qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {p['hero_1']},
+                    stop:1 {p['hero_3']}
+                );
+                border:none;
+            }}
+            QFrame#MemoryProspectCard {{
+                background:{p['primary_soft']};
+                border:1px solid {p['border_strong']};
+                border-radius:13px;
+            }}
+            QFrame#MemoryFormCard {{
+                background:{p['surface']};
+                border:1px solid {p['border']};
+                border-radius:15px;
+            }}
+            QComboBox {{
+                background:{p['surface']};
+                color:{p['text']};
+                border:1px solid {p['border']};
+                border-radius:10px;
+                padding:0 11px;
+                font-size:10px;
+                font-weight:800;
+            }}
+            QComboBox:focus {{
+                border:1px solid #338CE4;
+            }}
+            QComboBox::drop-down {{
+                border:none;
+                width:30px;
+            }}
+            QComboBox QAbstractItemView {{
+                background:{p['surface']};
+                color:{p['text']};
+                border:1px solid {p['border']};
+                selection-background-color:{p['selection']};
+                selection-color:{p['selection_text']};
+            }}
+            QTextEdit {{
+                background:{p['surface_alt']};
+                color:{p['text']};
+                border:1px solid {p['border']};
+                border-radius:11px;
+                padding:11px;
+                font-size:10px;
+                selection-background-color:#338CE4;
+                selection-color:#FFFFFF;
+            }}
+            QTextEdit:focus {{
+                border:1px solid #338CE4;
+            }}
+            QPushButton#MemoryCancel {{
+                background:{p['surface']};
+                color:{p['text_soft']};
+                border:1px solid {p['border']};
+                border-radius:10px;
+                padding:0 17px;
+                font-size:10px;
+                font-weight:850;
+            }}
+            QPushButton#MemoryCancel:hover {{
+                background:{p['surface_alt']};
+                color:{p['primary_text']};
+                border-color:{p['border_strong']};
+            }}
+            QPushButton#MemorySave {{
+                background:#338CE4;
+                color:#FFFFFF;
+                border:1px solid #5FAFF5;
+                border-radius:10px;
+                padding:0 19px;
+                font-size:10px;
+                font-weight:900;
+            }}
+            QPushButton#MemorySave:hover {{
+                background:#287FD4;
+            }}
+            QPushButton#MemorySave:disabled {{
+                background:{p['surface_soft']};
+                color:{p['muted']};
+                border-color:{p['border']};
+            }}
+            """
         )
 
         root = QVBoxLayout(dialog)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Header premium
         header = QFrame()
         header.setObjectName("MemoryHeader")
-        header.setStyleSheet(
-            "QFrame#MemoryHeader{"
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #081F3D, stop:1 #123F70);"
-            "border:none;}"
-            "QLabel{background:transparent;border:none;}"
-        )
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(24, 20, 24, 18)
-        header_layout.setSpacing(5)
+        header_layout.setContentsMargins(24, 19, 24, 17)
+        header_layout.setSpacing(4)
 
         overline = QLabel("MÉMOIRE COMMERCIALE  •  COPILOTE")
         overline.setStyleSheet(
             "color:#79C7FF;font-size:9px;font-weight:900;letter-spacing:1px;"
         )
         title = QLabel("Ajouter une information à retenir")
-        title.setStyleSheet(
-            "color:#FFFFFF;font-size:23px;font-weight:900;"
-        )
+        title.setStyleSheet("color:#FFFFFF;font-size:22px;font-weight:950;")
         subtitle = QLabel(
             "Cette information enrichira le contexte du prospect et pourra être "
             "réutilisée lors des prochains échanges."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(
-            "color:#C5D7E9;font-size:10px;"
-        )
+        subtitle.setStyleSheet("color:#C5D7E9;font-size:10px;")
 
         header_layout.addWidget(overline)
         header_layout.addWidget(title)
@@ -908,105 +907,65 @@ class AIAssistantPage(QWidget):
         root.addWidget(header)
 
         body = QWidget()
-        body.setStyleSheet("background:#F5F8FC;")
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(22, 18, 22, 20)
-        body_layout.setSpacing(13)
+        body_layout.setContentsMargins(22, 17, 22, 19)
+        body_layout.setSpacing(12)
 
-        # Prospect context
         prospect_card = QFrame()
         prospect_card.setObjectName("MemoryProspectCard")
-        prospect_card.setStyleSheet(
-            "QFrame#MemoryProspectCard{background:#EEF6FF;"
-            "border:1px solid #CFE3F7;border-radius:14px;}"
-            "QLabel{background:transparent;border:none;}"
-        )
         prospect_layout = QHBoxLayout(prospect_card)
-        prospect_layout.setContentsMargins(14, 11, 14, 11)
-
-        prospect_icon = QLabel("🧠")
-        prospect_icon.setFixedSize(34, 34)
-        prospect_icon.setAlignment(Qt.AlignCenter)
-        prospect_icon.setStyleSheet(
-            "background:#FFFFFF;border:1px solid #D5E7F8;border-radius:10px;"
-            "font-size:15px;"
-        )
+        prospect_layout.setContentsMargins(13, 10, 13, 10)
 
         prospect_text = QVBoxLayout()
         prospect_text.setSpacing(1)
         prospect_caption = QLabel("PROSPECT SÉLECTIONNÉ")
         prospect_caption.setStyleSheet(
-            "color:#338CE4;font-size:8px;font-weight:900;letter-spacing:.7px;"
+            f"color:{p['primary_text']};font-size:8px;font-weight:900;"
+            "letter-spacing:.7px;"
         )
-        prospect_name = QLabel(self.selected_title.text().strip() or "Prospect sélectionné")
+        prospect_name = QLabel(
+            self.selected_title.text().strip() or "Prospect sélectionné"
+        )
         prospect_name.setStyleSheet(
-            "color:#0B2A52;font-size:12px;font-weight:900;"
+            f"color:{p['text']};font-size:11px;font-weight:900;"
         )
+
         prospect_text.addWidget(prospect_caption)
         prospect_text.addWidget(prospect_name)
-
-        prospect_layout.addWidget(prospect_icon)
-        prospect_layout.addSpacing(7)
         prospect_layout.addLayout(prospect_text, 1)
         body_layout.addWidget(prospect_card)
 
-        # Form card
         form_card = QFrame()
         form_card.setObjectName("MemoryFormCard")
-        form_card.setStyleSheet(
-            "QFrame#MemoryFormCard{background:#FFFFFF;"
-            "border:1px solid #E4EBF4;border-radius:16px;}"
-            "QLabel{background:transparent;border:none;}"
-        )
         form_layout = QVBoxLayout(form_card)
-        form_layout.setContentsMargins(16, 15, 16, 16)
-        form_layout.setSpacing(9)
+        form_layout.setContentsMargins(15, 14, 15, 15)
+        form_layout.setSpacing(8)
 
         category_label = QLabel("Catégorie de mémoire")
         category_label.setStyleSheet(
-            "color:#334155;font-size:10px;font-weight:850;"
+            f"color:{p['text_soft']};font-size:10px;font-weight:850;"
         )
-
         category_combo = QComboBox()
         category_combo.addItems(list(self.service.MEMORY_TYPES))
-        category_combo.setMinimumHeight(42)
-        category_combo.setStyleSheet(
-            "QComboBox{background:#FFFFFF;color:#172033;"
-            "border:1px solid #D7E2EE;border-radius:10px;"
-            "padding:0 12px;font-size:11px;font-weight:800;}"
-            "QComboBox:focus{border:2px solid #338CE4;}"
-            "QComboBox::drop-down{border:none;border-left:1px solid #E6EDF5;"
-            "width:34px;background:#F8FBFF;}"
-            "QComboBox QAbstractItemView{background:#FFFFFF;color:#172033;"
-            "border:1px solid #D7E2EE;selection-background-color:#EAF4FF;"
-            "selection-color:#0B2A52;padding:4px;}"
-        )
+        category_combo.setMinimumHeight(40)
 
         content_label = QLabel("Information à mémoriser")
         content_label.setStyleSheet(
-            "color:#334155;font-size:10px;font-weight:850;"
+            f"color:{p['text_soft']};font-size:10px;font-weight:850;"
         )
-
         content_edit = QTextEdit()
         content_edit.setPlaceholderText(
-            "Exemple : le dirigeant souhaite gagner du temps sur le suivi des chantiers "
-            "et veut revoir la proposition après la rentrée…"
+            "Exemple : le dirigeant souhaite gagner du temps sur le suivi des "
+            "chantiers et veut revoir la proposition après la rentrée…"
         )
-        content_edit.setMinimumHeight(150)
-        content_edit.setStyleSheet(
-            "QTextEdit{background:#FBFDFF;color:#172033;"
-            "border:1px solid #D7E2EE;border-radius:12px;"
-            "padding:12px;font-size:11px;}"
-            "QTextEdit:focus{border:2px solid #338CE4;}"
-        )
+        content_edit.setMinimumHeight(145)
 
         helper = QLabel(
-            "Conseil : saisissez une information courte, factuelle et utile pour le prochain échange."
+            "Conseil : saisissez une information courte, factuelle et utile pour "
+            "le prochain échange."
         )
         helper.setWordWrap(True)
-        helper.setStyleSheet(
-            "color:#7A8A9E;font-size:9px;"
-        )
+        helper.setStyleSheet(f"color:{p['muted']};font-size:9px;")
 
         form_layout.addWidget(category_label)
         form_layout.addWidget(category_combo)
@@ -1016,33 +975,19 @@ class AIAssistantPage(QWidget):
         form_layout.addWidget(helper)
         body_layout.addWidget(form_card, 1)
 
-        # Buttons
         actions = QHBoxLayout()
-        actions.setSpacing(10)
+        actions.setSpacing(9)
         actions.addStretch()
 
         cancel_button = QPushButton("Annuler")
+        cancel_button.setObjectName("MemoryCancel")
         cancel_button.setCursor(Qt.PointingHandCursor)
-        cancel_button.setMinimumSize(105, 42)
-        cancel_button.setStyleSheet(
-            "QPushButton{background:#FFFFFF;color:#334155;"
-            "border:1px solid #CBD8E6;border-radius:11px;"
-            "padding:0 18px;font-size:10px;font-weight:850;}"
-            "QPushButton:hover{background:#F4F9FF;color:#247BD0;"
-            "border-color:#8DBCEB;}"
-            "QPushButton:pressed{background:#EAF4FE;}"
-        )
+        cancel_button.setMinimumSize(104, 40)
 
         save_button = QPushButton("＋  Ajouter à la mémoire")
+        save_button.setObjectName("MemorySave")
         save_button.setCursor(Qt.PointingHandCursor)
-        save_button.setMinimumSize(190, 42)
-        save_button.setStyleSheet(
-            "QPushButton{background:#338CE4;color:#FFFFFF;border:none;"
-            "border-radius:11px;padding:0 20px;font-size:10px;font-weight:900;}"
-            "QPushButton:hover{background:#287FD4;}"
-            "QPushButton:pressed{background:#1E6DBA;}"
-            "QPushButton:disabled{background:#DCE6F0;color:#94A3B8;}"
-        )
+        save_button.setMinimumSize(190, 40)
         save_button.setEnabled(False)
 
         def update_save_state():
@@ -1055,7 +1000,6 @@ class AIAssistantPage(QWidget):
         actions.addWidget(cancel_button)
         actions.addWidget(save_button)
         body_layout.addLayout(actions)
-
         root.addWidget(body, 1)
 
         if dialog.exec() != QDialog.Accepted:

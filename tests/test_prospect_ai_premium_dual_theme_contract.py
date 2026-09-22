@@ -9,9 +9,14 @@ PROSPECT = (ROOT / "ui" / "dialogs" / "prospect_dialog.py").read_text(encoding="
 ACCOUNT = (ROOT / "ui" / "pages" / "account_page.py").read_text(encoding="utf-8")
 MAIN = (ROOT / "ui" / "windows" / "main_window.py").read_text(encoding="utf-8")
 
+AI_ASSISTANT = (ROOT / "ui" / "pages" / "ai_assistant_page.py").read_text(
+    encoding="utf-8"
+)
+AI_THEME = (ROOT / "ui" / "ai_premium_theme.py").read_text(encoding="utf-8")
+
 
 def test_global_theme_sources_are_valid_python():
-    for source in (THEME_SETTINGS, DIALOG, PROSPECT, ACCOUNT, MAIN):
+    for source in (THEME_SETTINGS, DIALOG, PROSPECT, ACCOUNT, MAIN, AI_ASSISTANT, AI_THEME):
         ast.parse(source)
 
 
@@ -53,3 +58,25 @@ def test_appearance_dialog_has_exactly_three_choices():
     assert "CLASSIQUE" in DIALOG
     assert "UI CLAIR" in DIALOG
     assert "UI SOMBRE" in DIALOG
+
+
+def test_ai_assistant_reads_global_theme_without_rebuilding_business_data():
+    assert "get_theme_preference()" in AI_ASSISTANT
+    assert "assistant_page_palette" in AI_ASSISTANT
+    assert "assistant_page_stylesheet" in AI_ASSISTANT
+    show_block = AI_ASSISTANT.split("def showEvent(self, event):", 1)[1].split(
+        "def _build_ui", 1
+    )[0]
+    assert "_apply_visual_theme()" in show_block
+    assert "CloudRuntime" not in show_block
+    assert "self.service" not in show_block
+
+
+def test_ai_assistant_keeps_one_structure_for_all_three_themes():
+    palette_block = AI_THEME.split("def assistant_page_palette(", 1)[1].split(
+        "def assistant_page_stylesheet", 1
+    )[0]
+    assert "THEME_UI_DARK" in palette_block
+    assert "THEME_CLASSIC" in palette_block
+    assert "theme_values" in palette_block
+    assert "QStackedWidget" not in AI_ASSISTANT

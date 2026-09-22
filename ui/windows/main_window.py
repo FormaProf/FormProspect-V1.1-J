@@ -2,7 +2,7 @@ import threading
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QMessageBox, QWidget
 
 from core.constants import *
 from core.paths import resource_path
@@ -40,6 +40,12 @@ from ui.pages.sequences_page import SequencesPage
 from ui.pages.prospects_page import ProspectsPage
 from ui.pages.treatment_page import TreatmentPage
 from ui.widgets.sidebar import Sidebar
+from ui.responsive_layout import (
+    ResponsiveManager,
+    ResponsivePageHost,
+    ResponsiveStackedWidget,
+    fit_window_to_available_geometry,
+)
 
 
 class MainWindow(QMainWindow):
@@ -48,14 +54,15 @@ class MainWindow(QMainWindow):
         self.auth_service = auth_service
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
         self.setWindowIcon(QIcon(resource_path("assets/icons/formaprospect.ico")))
-        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        fit_window_to_available_geometry(self, WINDOW_WIDTH, WINDOW_HEIGHT)
 
         root = QWidget()
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.sidebar = Sidebar()
-        self.pages = QStackedWidget()
+        self.pages = ResponsiveStackedWidget()
+        self.page_host = ResponsivePageHost(self.pages)
 
         self.is_trainer_space = SessionState.has_role("Formateur")
         self.commercial_projects_page = None
@@ -169,8 +176,19 @@ class MainWindow(QMainWindow):
         print("[MAIN] Toutes les pages autorisées créées", flush=True)
 
         layout.addWidget(self.sidebar)
-        layout.addWidget(self.pages)
+        layout.addWidget(self.page_host, 1)
         self.setCentralWidget(root)
+
+        # Responsive transversal : le QStackedWidget reste inchangé pour toutes
+        # les pages. Le host ne re-parent aucun contenu métier et ne modifie
+        # aucun thème ; il fournit uniquement le débordement/scroll nécessaire.
+        self.responsive_manager = ResponsiveManager(
+            window=self,
+            host=self.page_host,
+            stack=self.pages,
+            sidebar=self.sidebar,
+        )
+
         NotificationManager.configure(self)
 
         self.account_page.appearance_requested.connect(self.ouvrir_apparence)
@@ -493,6 +511,8 @@ class MainWindow(QMainWindow):
             return
 
         parents = service.list_for_commercial(self.commercial_user_id)
+        if getattr(self, "commercial_projects_page", None) is not None:
+            self.commercial_projects_page.cache_universe_context(parents)
         decision = service.resolve_initial_navigation(parents)
 
         if decision.mode == "open_project" and decision.project_id:
@@ -510,6 +530,11 @@ class MainWindow(QMainWindow):
         """
         for attribute in (
             "dashboard_page",
+            "agenda_page",
+            "commissions_page",
+            "documents_page",
+            "trainer_availability_page",
+            "training_cases_page",
             "admin_commercial_projects_page",
             "commercial_projects_page",
         ):
@@ -543,6 +568,19 @@ class MainWindow(QMainWindow):
 
         cloud_project = CloudRuntime.api().get_project(project_id)
         ApplicationState.set_cloud_project(cloud_project)
+
+        universe_name = ""
+        page = getattr(self, "commercial_projects_page", None)
+        if page is not None and hasattr(page, "universe_name_for_project"):
+            universe_name = page.universe_name_for_project(project_id)
+
+        prospects_page = getattr(self, "prospects_page", None)
+        if prospects_page is not None and hasattr(
+            prospects_page,
+            "set_crm_universe",
+        ):
+            prospects_page.set_crm_universe(universe_name)
+
         self.ouvrir_prospects()
 
     def ouvrir_dashboard(self):
@@ -637,6 +675,7 @@ class MainWindow(QMainWindow):
     def ouvrir_dossiers_formation(self):
         if self._refuser_espace_commercial_au_formateur():
             return
+        MainWindow._sync_commercial_project_theme_pages(self)
         self.training_cases_page.rafraichir()
         self.mettre_a_jour_barre_statut()
         self.pages.setCurrentWidget(self.training_cases_page)

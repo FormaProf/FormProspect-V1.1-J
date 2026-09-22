@@ -19,19 +19,15 @@ from PySide6.QtWidgets import (
     QGridLayout,
 )
 
-from core.premium_theme import (
-    BORDER,
-    CARD,
-    MUTED,
-    PAGE_BG,
-    PRIMARY_BUTTON,
-    SECONDARY_BUTTON,
-    TEXT,
-)
 from core.session import SessionState
+from core.theme_settings import get_theme_preference
+from ui.commissions_premium_theme import (
+    commissions_page_stylesheet,
+    commissions_palette,
+    commissions_table_stylesheet,
+)
 from services.cloud_api_client import CloudAPIError
 from services.cloud_runtime import CloudRuntime
-from ui.components.metric_card import MetricCard
 from ui.dialogs.new_sale_dialog import NewSaleDialog
 from ui.dialogs.commission_invoices_dialog import CommissionInvoicesDialog
 from ui.dialogs.partner_commission_statements_dialog import PartnerCommissionStatementsDialog
@@ -45,53 +41,42 @@ MONTHS = [
 
 
 class PremiumFinanceCard(QFrame):
-    """Carte KPI compacte et premium dédiée aux ventes & commissions."""
+    """Carte KPI compacte pour le cockpit ventes & commissions."""
 
-    def __init__(self, label: str, value: str, accent: str, helper: str = ""):
+    def __init__(
+        self,
+        label: str,
+        value: str,
+        accent_key: str,
+        helper: str = "",
+    ):
         super().__init__()
-        self.setObjectName("PremiumFinanceCard")
-        self.setMinimumHeight(100)
-        self.setStyleSheet("""
-            QFrame#PremiumFinanceCard {
-                background:#FFFFFF;
-                border:1px solid #E4EBF4;
-                border-radius:16px;
-            }
-        """)
+        self.setObjectName("SalesKpiCard")
+        self.setMinimumHeight(88)
+        self.accent_key = str(accent_key or "primary")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 13)
-        layout.setSpacing(4)
+        layout.setContentsMargins(14, 12, 14, 11)
+        layout.setSpacing(3)
 
         top = QHBoxLayout()
-        top.setSpacing(8)
+        top.setSpacing(7)
 
-        dot = QLabel()
-        dot.setFixedSize(10, 10)
-        dot.setStyleSheet(
-            f"background:{accent}; border:none; border-radius:5px;"
-        )
+        self.dot = QLabel()
+        self.dot.setFixedSize(9, 9)
 
         self.label = QLabel(label)
-        self.label.setStyleSheet(
-            "font-size:11px; font-weight:800; color:#5E7087; "
-            "background:transparent; border:none;"
-        )
+        self.label.setObjectName("SalesKpiLabel")
 
-        top.addWidget(dot)
+        top.addWidget(self.dot)
         top.addWidget(self.label)
         top.addStretch()
 
         self.value = QLabel(value)
-        self.value.setStyleSheet(
-            "font-size:22px; font-weight:900; color:#0B1220; "
-            "background:transparent; border:none;"
-        )
+        self.value.setObjectName("SalesKpiValue")
 
         self.helper = QLabel(helper)
-        self.helper.setStyleSheet(
-            "font-size:9px; color:#8A99AB; background:transparent; border:none;"
-        )
+        self.helper.setObjectName("SalesKpiHelper")
 
         layout.addLayout(top)
         layout.addWidget(self.value)
@@ -101,182 +86,179 @@ class PremiumFinanceCard(QFrame):
     def set_value(self, value: str):
         self.value.setText(str(value))
 
+    def apply_palette(self, palette: dict[str, str]) -> None:
+        accent = palette.get(self.accent_key, palette["primary"])
+        self.dot.setStyleSheet(
+            f"background:{accent}; border:none; border-radius:4px;"
+        )
+
 
 class CommissionsPage(QWidget):
     """Pilotage Cloud des ventes, encaissements et commissions."""
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("CommissionsPage")
         self.sales_rows: list[dict] = []
-        self.setStyleSheet(f"background:{PAGE_BG};")
+        self._resolved_theme = get_theme_preference()
+        self._palette = commissions_palette(self._resolved_theme)
+        self._status_tone = "muted"
         self._build_ui()
+        self._apply_visual_theme()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(26, 22, 26, 28)
-        root.setSpacing(16)
+        root.setContentsMargins(22, 18, 22, 22)
+        root.setSpacing(12)
 
         # -------------------------
-        # Header premium
+        # Header / période / actions
         # -------------------------
         header_card = QFrame()
         header_card.setObjectName("SalesHeader")
-        header_card.setStyleSheet("""
-            QFrame#SalesHeader {
-                background:qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #FFFFFF,
-                    stop:0.72 #F7FBFF,
-                    stop:1 #EAF4FF
-                );
-                border:1px solid #E4EBF4;
-                border-radius:20px;
-            }
-        """)
 
-        header = QHBoxLayout(header_card)
-        header.setContentsMargins(22, 18, 20, 18)
-        header.setSpacing(14)
+        header_root = QVBoxLayout(header_card)
+        header_root.setContentsMargins(20, 16, 18, 14)
+        header_root.setSpacing(12)
+
+        header_top = QHBoxLayout()
+        header_top.setSpacing(14)
 
         titles = QVBoxLayout()
-        titles.setSpacing(3)
+        titles.setSpacing(2)
 
-        eyebrow = QLabel("VENTES  •  PERFORMANCE COMMERCIALE")
-        eyebrow.setStyleSheet(
-            "font-size:10px; font-weight:900; letter-spacing:1.1px; "
-            "color:#338CE4; background:transparent; border:none;"
-        )
+        eyebrow = QLabel("VENTES  •  PILOTAGE FINANCIER")
+        eyebrow.setObjectName("SalesEyebrow")
 
         title = QLabel("Ventes & commissions")
-        title.setStyleSheet(
-            "font-size:28px; font-weight:900; color:#0B1220; "
-            "background:transparent; border:none;"
-        )
+        title.setObjectName("SalesTitle")
 
         self.subtitle = QLabel(
             "Suivi sécurisé des contrats, encaissements et commissions dans le Cloud."
         )
+        self.subtitle.setObjectName("SalesSubtitle")
         self.subtitle.setWordWrap(True)
-        self.subtitle.setStyleSheet(
-            "font-size:12px; color:#6B7A90; background:transparent; border:none;"
-        )
 
         titles.addWidget(eyebrow)
         titles.addWidget(title)
         titles.addWidget(self.subtitle)
 
-        header.addLayout(titles, 1)
+        header_top.addLayout(titles, 1)
 
         current = date.today()
 
+        period_panel = QFrame()
+        period_panel.setObjectName("SalesPeriodPanel")
+        period_layout = QHBoxLayout(period_panel)
+        period_layout.setContentsMargins(12, 8, 10, 8)
+        period_layout.setSpacing(8)
+
+        period_label = QLabel("PÉRIODE")
+        period_label.setObjectName("SalesPeriodLabel")
+
         self.month_combo = QComboBox()
+        self.month_combo.setObjectName("SalesPeriodCombo")
         self.month_combo.addItems(MONTHS)
         self.month_combo.setCurrentIndex(current.month - 1)
-        self.month_combo.setFixedHeight(40)
-        self.month_combo.setMinimumWidth(108)
+        self.month_combo.setFixedHeight(36)
+        self.month_combo.setMinimumWidth(112)
 
         self.year_combo = QComboBox()
-        # Plage d'années dynamique :
-        # conserve quelques années passées et permet de planifier loin dans le futur.
+        self.year_combo.setObjectName("SalesPeriodCombo")
         self.year_combo.addItems(
             [str(year) for year in range(current.year - 3, current.year + 21)]
         )
         self.year_combo.setCurrentText(str(current.year))
-        self.year_combo.setFixedHeight(40)
+        self.year_combo.setFixedHeight(36)
         self.year_combo.setMinimumWidth(78)
 
-        combo_style = """
-            QComboBox {
-                background:#FFFFFF;
-                color:#172033;
-                border:1px solid #DCE5EF;
-                border-radius:10px;
-                padding:0 10px;
-                font-size:11px;
-                font-weight:800;
-            }
-            QComboBox:focus {
-                border:2px solid #338CE4;
-            }
-            QComboBox::drop-down {
-                border:none;
-                width:24px;
-            }
-        """
-        self.month_combo.setStyleSheet(combo_style)
-        self.year_combo.setStyleSheet(combo_style)
+        self.cloud_badge = QLabel("")
+        self.cloud_badge.setObjectName("SalesCloudBadge")
+        self.cloud_badge.setAlignment(Qt.AlignCenter)
 
-        refresh_button = QPushButton("Actualiser")
-        refresh_button.setFixedHeight(40)
-        refresh_button.setStyleSheet(self._secondary_button_style())
-        refresh_button.clicked.connect(self.rafraichir)
+        period_layout.addWidget(period_label)
+        period_layout.addWidget(self.month_combo)
+        period_layout.addWidget(self.year_combo)
+
+        header_top.addWidget(self.cloud_badge, 0, Qt.AlignTop)
+        header_top.addWidget(period_panel, 0, Qt.AlignTop)
+
+        header_root.addLayout(header_top)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+
+        self.refresh_button = QPushButton("Actualiser")
+        self.refresh_button.setObjectName("SalesSecondaryButton")
+        self.refresh_button.setFixedHeight(38)
+        self.refresh_button.clicked.connect(self.rafraichir)
 
         self.history_button = QPushButton("Historique factures")
-        self.history_button.setFixedHeight(40)
-        self.history_button.setStyleSheet(self._secondary_button_style())
+        self.history_button.setObjectName("SalesSecondaryButton")
+        self.history_button.setFixedHeight(38)
         self.history_button.clicked.connect(self._open_invoice_history)
-        # Historique personnel : commerciaux indépendants + administration.
-        # Un Dirigeant hors France utilise le workflow partenaire séparé.
         self.history_button.setVisible(
             SessionState.has_role("Commercial", "Administrateur")
         )
 
         self.partner_history_button = QPushButton("Relevés partenaire")
-        self.partner_history_button.setFixedHeight(40)
-        self.partner_history_button.setStyleSheet(self._secondary_button_style())
+        self.partner_history_button.setObjectName("SalesSecondaryButton")
+        self.partner_history_button.setFixedHeight(38)
         self.partner_history_button.setVisible(
             SessionState.has_role("Administrateur", "Dirigeant hors France")
         )
-        self.partner_history_button.clicked.connect(self._open_partner_statement_history)
+        self.partner_history_button.clicked.connect(
+            self._open_partner_statement_history
+        )
 
         self.invoice_button = QPushButton("Générer ma facture")
-        self.invoice_button.setFixedHeight(40)
-        self.invoice_button.setStyleSheet(self._primary_button_style())
+        self.invoice_button.setObjectName("SalesSecondaryButton")
+        self.invoice_button.setFixedHeight(38)
         self.invoice_button.setVisible(SessionState.has_role("Commercial"))
         self.invoice_button.clicked.connect(self._generate_invoice)
 
-        self.add_button = QPushButton("Enregistrer une vente")
-        self.add_button.setFixedHeight(40)
-        self.add_button.setStyleSheet(self._primary_button_style())
+        self.add_button = QPushButton("＋ Enregistrer une vente")
+        self.add_button.setObjectName("SalesPrimaryButton")
+        self.add_button.setFixedHeight(38)
         self.add_button.clicked.connect(self._new_sale)
 
-        header.addWidget(self.month_combo)
-        header.addWidget(self.year_combo)
-        header.addWidget(refresh_button)
-        header.addWidget(self.history_button)
-        header.addWidget(self.partner_history_button)
-        header.addWidget(self.invoice_button)
-        header.addWidget(self.add_button)
+        actions.addWidget(self.refresh_button)
+        actions.addWidget(self.history_button)
+        actions.addWidget(self.partner_history_button)
+        actions.addWidget(self.invoice_button)
+        actions.addStretch()
+        actions.addWidget(self.add_button)
 
+        header_root.addLayout(actions)
         root.addWidget(header_card)
 
         # -------------------------
-        # KPI premium 3 x 2
+        # KPI financiers compacts
         # -------------------------
         cards = QGridLayout()
-        cards.setHorizontalSpacing(12)
-        cards.setVerticalSpacing(12)
+        cards.setHorizontalSpacing(9)
+        cards.setVerticalSpacing(9)
 
         self.contracts_card = PremiumFinanceCard(
-            "Contrats signés", "0", "#338CE4", "Ventes enregistrées"
+            "Contrats signés", "0", "primary", "Ventes enregistrées"
         )
         self.signed_revenue_card = PremiumFinanceCard(
-            "CA signé", "0,00 €", "#0B2A52", "Valeur contractuelle"
+            "CA signé", "0,00 €", "finance", "Valeur contractuelle"
         )
         self.collected_revenue_card = PremiumFinanceCard(
-            "CA encaissé", "0,00 €", "#16A34A", "Règlements clients reçus"
+            "CA encaissé", "0,00 €", "success", "Règlements reçus"
         )
         self.pending_card = PremiumFinanceCard(
-            "Commissions en attente", "0,00 €", "#F59E0B", "En cours de validation"
+            "Commissions en attente", "0,00 €", "warning", "En validation"
         )
         self.due_card = PremiumFinanceCard(
-            "Commissions à verser", "0,00 €", "#7C3AED", "Validées et dues"
+            "Commissions à verser", "0,00 €", "violet", "Validées et dues"
         )
         self.paid_card = PremiumFinanceCard(
-            "Commissions versées", "0,00 €", "#16A34A", "Paiements finalisés"
+            "Commissions versées", "0,00 €", "success", "Paiements finalisés"
         )
 
-        metric_cards = [
+        self.metric_cards = [
             self.contracts_card,
             self.signed_revenue_card,
             self.collected_revenue_card,
@@ -284,57 +266,47 @@ class CommissionsPage(QWidget):
             self.due_card,
             self.paid_card,
         ]
-        for index, card in enumerate(metric_cards):
-            cards.setColumnStretch(index % 3, 1)
-            cards.addWidget(card, index // 3, index % 3)
+
+        for index, card in enumerate(self.metric_cards):
+            cards.setColumnStretch(index, 1)
+            cards.addWidget(card, 0, index)
 
         root.addLayout(cards)
 
         # -------------------------
-        # Détail des ventes
+        # Flux financier / ventes
         # -------------------------
         table_frame = QFrame()
         table_frame.setObjectName("SalesTableCard")
-        table_frame.setStyleSheet("""
-            QFrame#SalesTableCard {
-                background:#FFFFFF;
-                border:1px solid #E4EBF4;
-                border-radius:18px;
-            }
-        """)
 
         table_layout = QVBoxLayout(table_frame)
-        table_layout.setContentsMargins(16, 15, 16, 14)
-        table_layout.setSpacing(12)
+        table_layout.setContentsMargins(14, 13, 14, 13)
+        table_layout.setSpacing(10)
 
         table_header = QHBoxLayout()
         table_titles = QVBoxLayout()
         table_titles.setSpacing(2)
 
-        table_eyebrow = QLabel("ACTIVITÉ COMMERCIALE")
-        table_eyebrow.setStyleSheet(
-            "font-size:10px; font-weight:900; letter-spacing:1px; "
-            "color:#338CE4; background:transparent; border:none;"
-        )
+        table_eyebrow = QLabel("FLUX FINANCIER DU MOIS")
+        table_eyebrow.setObjectName("SalesSectionEyebrow")
 
         table_title = QLabel("Détail des ventes")
-        table_title.setStyleSheet(
-            "font-size:18px; font-weight:900; color:#0B1220; "
-            "background:transparent; border:none;"
+        table_title.setObjectName("SalesTableTitle")
+
+        table_helper = QLabel(
+            "Contrats, encaissements et commissions de la période sélectionnée."
         )
+        table_helper.setObjectName("SalesTableHelper")
 
         table_titles.addWidget(table_eyebrow)
         table_titles.addWidget(table_title)
+        table_titles.addWidget(table_helper)
 
-        self.period_summary = QLabel("")
+        self.period_summary = QLabel("0 vente")
+        self.period_summary.setObjectName("SalesPeriodSummary")
         self.period_summary.setAlignment(Qt.AlignCenter)
-        self.period_summary.setMinimumWidth(112)
+        self.period_summary.setMinimumWidth(104)
         self.period_summary.setFixedHeight(28)
-        self.period_summary.setStyleSheet(
-            "font-size:10px; font-weight:900; color:#075985; "
-            "background:#EFF8FF; border:1px solid #BAE6FD; "
-            "border-radius:10px; padding:0 10px;"
-        )
 
         table_header.addLayout(table_titles)
         table_header.addStretch()
@@ -366,78 +338,24 @@ class CommissionsPage(QWidget):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-
-        # Répartition lisible de toute la largeur disponible :
-        # Client gagne un peu d'espace, Formation reste compacte et Statut
-        # absorbe automatiquement tout l'espace restant.
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-        self.table.setColumnWidth(1, 240)
-        self.table.setColumnWidth(2, 190)
+        self.table.setColumnWidth(1, 230)
+        self.table.setColumnWidth(2, 180)
 
         if self.show_commercial_column:
-            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-            self.table.setColumnWidth(3, 155)
-        self.table.setMinimumHeight(330)
+            self.table.horizontalHeader().setSectionResizeMode(
+                3, QHeaderView.Fixed
+            )
+            self.table.setColumnWidth(3, 150)
 
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background:#FFFFFF;
-                color:#1F2937;
-                border:1px solid #E4EBF4;
-                border-radius:14px;
-                gridline-color:transparent;
-                font-size:11px;
-                outline:0;
-            }
-            QTableWidget::item {
-                padding:9px 8px;
-                border:none;
-                border-bottom:1px solid #EEF2F6;
-            }
-            QTableWidget::item:selected {
-                background:#EAF4FF;
-                color:#0B1220;
-            }
-            QHeaderView {
-                background:#0B2A52;
-                border:none;
-            }
-            QHeaderView::section {
-                background:#0B2A52;
-                color:#FFFFFF;
-                border:none;
-                border-right:1px solid rgba(255,255,255,0.08);
-                padding:10px 8px;
-                font-size:10px;
-                font-weight:900;
-            }
-            QScrollBar:vertical {
-                background:transparent;
-                width:9px;
-                margin:3px 1px 3px 1px;
-            }
-            QScrollBar::handle:vertical {
-                background:#CBD5E1;
-                min-height:32px;
-                border-radius:4px;
-            }
-            QScrollBar:horizontal {
-                background:transparent;
-                height:9px;
-            }
-            QScrollBar::handle:horizontal {
-                background:#CBD5E1;
-                min-width:40px;
-                border-radius:4px;
-            }
-        """)
-
+        self.table.setMinimumHeight(285)
         self.table.itemSelectionChanged.connect(self._update_action_buttons)
 
-        # Index dynamiques selon le rôle connecté.
         self.rate_col = self.table_headers.index("Taux")
         self.status_col = self.table_headers.index("Statut")
         self.amount_col = self.table_headers.index("Montant")
@@ -454,49 +372,70 @@ class CommissionsPage(QWidget):
             self.status_col, QHeaderView.Stretch
         )
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setColumnWidth(self.rate_col, 100)
-        self.table.setColumnWidth(self.payment_col, 185)
+        self.table.setColumnWidth(self.rate_col, 92)
+        self.table.setColumnWidth(self.payment_col, 180)
+
+        self.empty_state = QFrame()
+        self.empty_state.setObjectName("SalesEmptyState")
+        self.empty_state.setMinimumHeight(210)
+
+        empty_layout = QVBoxLayout(self.empty_state)
+        empty_layout.setContentsMargins(24, 24, 24, 24)
+        empty_layout.setSpacing(7)
+        empty_layout.setAlignment(Qt.AlignCenter)
+
+        empty_icon = QLabel("◎")
+        empty_icon.setObjectName("SalesEmptyIcon")
+        empty_icon.setFixedSize(38, 38)
+        empty_icon.setAlignment(Qt.AlignCenter)
+
+        empty_title = QLabel("Aucune vente sur cette période")
+        empty_title.setObjectName("SalesEmptyTitle")
+        empty_title.setAlignment(Qt.AlignCenter)
+
+        empty_helper = QLabel(
+            "Les nouvelles ventes apparaîtront ici dès leur enregistrement."
+        )
+        empty_helper.setObjectName("SalesEmptyHelper")
+        empty_helper.setAlignment(Qt.AlignCenter)
+        empty_helper.setWordWrap(True)
+
+        empty_layout.addWidget(empty_icon, 0, Qt.AlignCenter)
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(empty_helper)
 
         table_layout.addWidget(self.table)
+        table_layout.addWidget(self.empty_state)
         root.addWidget(table_frame, 1)
 
         # -------------------------
-        # Barre d'information / actions admin
+        # Information / actions administration
         # -------------------------
         footer_card = QFrame()
         footer_card.setObjectName("SalesFooter")
-        footer_card.setStyleSheet("""
-            QFrame#SalesFooter {
-                background:#FFFFFF;
-                border:1px solid #E4EBF4;
-                border-radius:14px;
-            }
-        """)
 
         action_bar = QHBoxLayout(footer_card)
-        action_bar.setContentsMargins(14, 10, 14, 10)
+        action_bar.setContentsMargins(13, 9, 13, 9)
         action_bar.setSpacing(8)
 
         self.status_label = QLabel("")
+        self.status_label.setObjectName("SalesStatusText")
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet(
-            "font-size:10px; color:#6B7A90; background:transparent; border:none;"
-        )
         action_bar.addWidget(self.status_label, 1)
 
         self.client_paid_button = QPushButton("Valider l'encaissement")
-        self.client_paid_button.setFixedHeight(38)
-        self.client_paid_button.setStyleSheet(self._secondary_button_style())
+        self.client_paid_button.setObjectName("SalesSecondaryButton")
+        self.client_paid_button.setFixedHeight(36)
         self.client_paid_button.clicked.connect(self._mark_client_paid)
 
         self.commission_paid_button = QPushButton("Commission versée")
-        self.commission_paid_button.setFixedHeight(38)
-        self.commission_paid_button.setStyleSheet(self._secondary_button_style())
+        self.commission_paid_button.setObjectName("SalesSecondaryButton")
+        self.commission_paid_button.setFixedHeight(36)
         self.commission_paid_button.clicked.connect(self._mark_commission_paid)
 
         self.cancel_button = QPushButton("Annuler la vente")
-        self.cancel_button.setFixedHeight(38)
-        self.cancel_button.setStyleSheet(self._danger_button_style())
+        self.cancel_button.setObjectName("SalesDangerButton")
+        self.cancel_button.setFixedHeight(36)
         self.cancel_button.clicked.connect(self._cancel_selected)
 
         is_admin = self._is_admin()
@@ -512,74 +451,89 @@ class CommissionsPage(QWidget):
 
         self.month_combo.currentIndexChanged.connect(self.rafraichir)
         self.year_combo.currentIndexChanged.connect(self.rafraichir)
+        self._update_table_empty_state()
         self._update_action_buttons()
 
-    @staticmethod
-    def _primary_button_style():
-        return """
-            QPushButton {
-                background:#338CE4;
-                color:#FFFFFF;
-                border:none;
-                border-radius:10px;
-                padding:0 15px;
-                font-size:11px;
-                font-weight:900;
-            }
-            QPushButton:hover { background:#247BD0; }
-            QPushButton:pressed { background:#1D66B2; }
-            QPushButton:disabled {
-                background:#DCE6F0;
-                color:#94A3B8;
-            }
-        """
+    def _apply_visual_theme(self) -> None:
+        self._resolved_theme = get_theme_preference()
+        self._palette = commissions_palette(self._resolved_theme)
 
-    @staticmethod
-    def _secondary_button_style():
-        return """
-            QPushButton {
-                background:#FFFFFF;
-                color:#334155;
-                border:1px solid #DCE5EF;
-                border-radius:10px;
-                padding:0 14px;
-                font-size:11px;
-                font-weight:850;
-            }
-            QPushButton:hover {
-                background:#F8FBFF;
-                color:#338CE4;
-                border-color:#AFCFF0;
-            }
-            QPushButton:disabled {
-                background:#F8FAFC;
-                color:#B4BECA;
-                border-color:#E8EDF3;
-            }
-        """
+        self.setStyleSheet(commissions_page_stylesheet(self._palette))
+        self.table.setStyleSheet(commissions_table_stylesheet(self._palette))
 
-    @staticmethod
-    def _danger_button_style():
-        return """
-            QPushButton {
-                background:#FFFFFF;
-                color:#B42318;
-                border:1px solid #F2C8C4;
-                border-radius:10px;
-                padding:0 14px;
-                font-size:11px;
-                font-weight:850;
-            }
-            QPushButton:hover {
-                background:#FFF5F4;
-                border-color:#E8A7A1;
-            }
-            QPushButton:disabled {
-                background:#F8FAFC;
-                color:#C5CBD3;
-                border-color:#E8EDF3;
-            }
-        """
+        for card in self.metric_cards:
+            card.apply_palette(self._palette)
+
+        self._refresh_cloud_badge()
+        self._set_status_text(self.status_label.text(), self._status_tone)
+        self._restyle_table_badges()
+
+    def _refresh_cloud_badge(self) -> None:
+        active = CloudRuntime.is_active()
+        if active:
+            bg = self._palette["success_bg"]
+            fg = self._palette["success_text"]
+            border = self._palette["success_border"]
+            text = "●  CLOUD · CONNECTÉ"
+        else:
+            bg = self._palette["neutral_bg"]
+            fg = self._palette["neutral_text"]
+            border = self._palette["neutral_border"]
+            text = "○  CLOUD · HORS LIGNE"
+
+        self.cloud_badge.setText(text)
+        self.cloud_badge.setStyleSheet(
+            f"background:{bg}; color:{fg}; border:1px solid {border}; "
+            "border-radius:10px; padding:5px 10px; "
+            "font-size:9px; font-weight:900;"
+        )
+
+    def _set_status_text(self, text: str, tone: str = "muted") -> None:
+        self._status_tone = str(tone or "muted")
+        self.status_label.setText(str(text or ""))
+
+        if self._status_tone == "danger":
+            color = self._palette["danger_text"]
+        elif self._status_tone == "info":
+            color = self._palette["primary_text"]
+        else:
+            color = self._palette["muted"]
+
+        self.status_label.setStyleSheet(
+            f"color:{color}; background:transparent; border:none; font-size:10px;"
+        )
+
+    def _update_table_empty_state(self) -> None:
+        has_rows = bool(self.sales_rows)
+        self.table.setVisible(has_rows)
+        self.empty_state.setVisible(not has_rows)
+        count = len(self.sales_rows)
+        self.period_summary.setText(
+            f"{count} vente" if count == 1 else f"{count} ventes"
+        )
+
+    def _restyle_table_badges(self) -> None:
+        for row_index, sale in enumerate(self.sales_rows):
+            if row_index >= self.table.rowCount():
+                break
+
+            rate_widget = self.table.cellWidget(row_index, self.rate_col)
+            if isinstance(rate_widget, QLabel):
+                rate_widget.setStyleSheet(self._rate_badge_style())
+
+            payment_widget = self.table.cellWidget(row_index, self.payment_col)
+            if isinstance(payment_widget, QLabel):
+                payment_widget.setStyleSheet(
+                    self._payment_badge_style(payment_widget.text())
+                )
+
+            status_widget = self.table.cellWidget(row_index, self.status_col)
+            if isinstance(status_widget, QLabel):
+                status_widget.setStyleSheet(
+                    self._status_badge_style(
+                        sale.get("display_status") or status_widget.text()
+                    )
+                )
 
     @staticmethod
     def _parse_iso_date(value) -> date | None:
@@ -625,45 +579,64 @@ class CommissionsPage(QWidget):
             "Seul l’administration peut confirmer l’encaissement.",
         )
 
-    @staticmethod
-    def _payment_badge_style(payment_text: str) -> str:
+    def _payment_badge_style(self, payment_text: str) -> str:
         text = str(payment_text or "").lower()
         if "payé" in text:
-            bg, fg, border = "#ECFDF3", "#166534", "#BBF7D0"
+            bg = self._palette["success_bg"]
+            fg = self._palette["success_text"]
+            border = self._palette["success_border"]
         elif "retard" in text or "rembours" in text:
-            bg, fg, border = "#FEF2F2", "#991B1B", "#FECACA"
+            bg = self._palette["danger_bg"]
+            fg = self._palette["danger_text"]
+            border = self._palette["danger_border"]
         else:
-            bg, fg, border = "#FFF7ED", "#9A3412", "#FED7AA"
+            bg = self._palette["warning_bg"]
+            fg = self._palette["warning_text"]
+            border = self._palette["warning_border"]
+
         return (
             f"background:{bg}; color:{fg}; border:1px solid {border}; "
-            "border-radius:10px; padding:4px 10px; font-size:10px; font-weight:900;"
+            "border-radius:10px; padding:4px 10px; "
+            "font-size:10px; font-weight:900;"
         )
 
-    @staticmethod
-    def _status_badge_style(status_text: str) -> str:
+    def _status_badge_style(self, status_text: str) -> str:
         text = str(status_text or "").lower()
 
         if "versée" in text or "payée" in text:
-            bg, fg, border = "#ECFDF3", "#166534", "#BBF7D0"
+            bg = self._palette["success_bg"]
+            fg = self._palette["success_text"]
+            border = self._palette["success_border"]
         elif "annul" in text:
-            bg, fg, border = "#FEF2F2", "#991B1B", "#FECACA"
+            bg = self._palette["danger_bg"]
+            fg = self._palette["danger_text"]
+            border = self._palette["danger_border"]
         elif "factur" in text:
-            bg, fg, border = "#FFF7ED", "#9A3412", "#FED7AA"
+            bg = self._palette["warning_bg"]
+            fg = self._palette["warning_text"]
+            border = self._palette["warning_border"]
         elif "validation automatique" in text or "à verser" in text:
-            bg, fg, border = "#EFF8FF", "#075985", "#BAE6FD"
+            bg = self._palette["info_bg"]
+            fg = self._palette["info_text"]
+            border = self._palette["info_border"]
         else:
-            bg, fg, border = "#F8FAFC", "#475569", "#E2E8F0"
+            bg = self._palette["neutral_bg"]
+            fg = self._palette["neutral_text"]
+            border = self._palette["neutral_border"]
 
         return (
             f"background:{bg}; color:{fg}; border:1px solid {border}; "
-            "border-radius:10px; padding:4px 12px; font-size:11px; font-weight:900;"
+            "border-radius:10px; padding:4px 12px; "
+            "font-size:11px; font-weight:900;"
         )
 
-    @staticmethod
-    def _rate_badge_style() -> str:
+    def _rate_badge_style(self) -> str:
         return (
-            "background:#F5F3FF; color:#5B21B6; border:1px solid #C4B5FD; "
-            "border-radius:10px; padding:4px 12px; font-size:12px; font-weight:900;"
+            f"background:{self._palette['violet_bg']}; "
+            f"color:{self._palette['violet_text']}; "
+            f"border:1px solid {self._palette['violet_border']}; "
+            "border-radius:10px; padding:4px 12px; "
+            "font-size:12px; font-weight:900;"
         )
 
     @staticmethod
@@ -694,23 +667,24 @@ class CommissionsPage(QWidget):
         self.pending_card.set_value("0,00 €")
         self.due_card.set_value("0,00 €")
         self.paid_card.set_value("0,00 €")
-        self.period_summary.setText("")
+        self._update_table_empty_state()
         self._update_action_buttons()
 
     def rafraichir(self, *_args) -> None:
+        self._refresh_cloud_badge()
         self.add_button.setEnabled(self._may_create() and CloudRuntime.is_active())
+
         if not CloudRuntime.is_active():
             self._reset()
             self.subtitle.setText(
                 "Connectez-vous à Form@Prospect Cloud pour consulter les ventes."
             )
-            self.status_label.setText("Aucune session Cloud active.")
+            self._set_status_text("Aucune session Cloud active.", "muted")
             return
 
         year = int(self.year_combo.currentText())
         month = self.month_combo.currentIndex() + 1
-        self.status_label.setStyleSheet(f"color:{MUTED};")
-        self.status_label.setText("Chargement des ventes Cloud…")
+        self._set_status_text("Chargement des ventes Cloud…", "info")
 
         try:
             api = CloudRuntime.api()
@@ -719,8 +693,7 @@ class CommissionsPage(QWidget):
         except (CloudAPIError, RuntimeError) as exc:
             self._reset()
             self.subtitle.setText("Ventes & commissions Cloud")
-            self.status_label.setStyleSheet("color:#B42318;")
-            self.status_label.setText(f"⛔ {exc}")
+            self._set_status_text(f"⛔ {exc}", "danger")
             return
 
         user = SessionState.user()
@@ -834,13 +807,12 @@ class CommissionsPage(QWidget):
 
             self.table.setRowHeight(row_index, 50)
 
-        self.period_summary.setText(
-            f"{len(self.sales_rows)} vente(s)"
-        )
-        self.status_label.setText(
+        self._update_table_empty_state()
+        self._set_status_text(
             "J+15 démarre à la signature de la convention. La commission n’est validée "
             "automatiquement que si le paiement client a été encaissé. Si J+15 tombe le mois "
-            "suivant, elle est reportée sur la facture du mois suivant."
+            "suivant, elle est reportée sur la facture du mois suivant.",
+            "muted",
         )
         self._update_action_buttons()
 

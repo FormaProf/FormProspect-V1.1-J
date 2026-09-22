@@ -54,5 +54,13 @@ def test_agenda_navigation_displays_page_before_refresh():
 def test_dashboard_keeps_dense_layout_and_weekly_quote_near_top():
     build = _method_block(DASHBOARD, "def _build_ui(self):")
     quote_pos = build.index("root.addWidget(self._build_quote_card())")
-    insights_pos = build.index("insight_grid = QGridLayout()")
-    assert quote_pos < insights_pos
+    kpi_pos = build.index("kpi_grid = QGridLayout()")
+    command_pos = build.index("command_grid = QGridLayout()")
+    health_pos = build.index("health_grid = QGridLayout()")
+    bottom_pos = build.index("bottom_grid = QGridLayout()")
+
+    assert quote_pos < kpi_pos < command_pos < health_pos < bottom_pos
+    assert "root.addLayout(kpi_grid)" in build
+    assert "root.addLayout(command_grid)" in build
+    assert "root.addLayout(health_grid)" in build
+    assert "root.addLayout(bottom_grid)" in build

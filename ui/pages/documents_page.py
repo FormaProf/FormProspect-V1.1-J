@@ -41,6 +41,14 @@ from core.premium_theme import (
     TEXT,
 )
 from core.session import SessionState
+from core.theme_settings import get_theme_preference
+from ui.documents_premium_theme import (
+    documents_badge_style,
+    documents_origin_badge_style,
+    documents_page_stylesheet,
+    documents_palette,
+    documents_table_stylesheet,
+)
 from services.cloud_api_client import CloudAPIError
 from services.cloud_runtime import CloudRuntime
 from services.document_generator_service import DocumentGeneratorService
@@ -267,102 +275,171 @@ class DocumentsPage(QWidget):
         self.cloud_documents: list[dict] = []
         self.cloud_document_quota: dict = {}
         self.cloud_prospect_names: dict[str, str] = {}
-        self.setStyleSheet(f"background:{PAGE_BG};")
+        self._theme_mode = get_theme_preference()
+        self.setObjectName("DocumentsPage")
         self._build_ui()
+        self._apply_visual_theme()
 
     def _card(self) -> QFrame:
         card = QFrame()
         card.setObjectName("DocumentCard")
-        card.setStyleSheet(
-            "QFrame#DocumentCard{"
-            "background:#FFFFFF;"
-            "border:1px solid #E8EEF5;"
-            "border-radius:18px;"
-            "}"
-            "QLabel{background:transparent;border:none;}"
-        )
         return card
+
+    def _apply_visual_theme(self):
+        self._theme_mode = get_theme_preference()
+        palette = documents_palette(self._theme_mode)
+
+        self.setStyleSheet(documents_page_stylesheet(palette))
+
+        for button in self.findChildren(QPushButton):
+            text = str(button.text() or "").lower()
+            name = button.objectName()
+            if not name:
+                if "supprimer" in text:
+                    button.setObjectName("DocumentsDangerButton")
+                elif text.startswith("+") or "générer" in text or "generer" in text:
+                    button.setObjectName("DocumentsPrimaryButton")
+                else:
+                    button.setObjectName("DocumentsSecondaryButton")
+            button.setStyleSheet("")
+
+        for combo in self.findChildren(QComboBox):
+            if not combo.objectName():
+                combo.setObjectName("DocumentsInput")
+            combo.setStyleSheet("")
+
+        for line_edit in self.findChildren(QLineEdit):
+            if not line_edit.objectName():
+                line_edit.setObjectName("DocumentsInput")
+            line_edit.setStyleSheet("")
+
+        for checkbox in self.findChildren(QCheckBox):
+            if not checkbox.objectName():
+                checkbox.setObjectName("DocumentsCheck")
+            checkbox.setStyleSheet("")
+
+        for tabs in self.findChildren(QTabWidget):
+            tabs.setObjectName("DocumentsTabs")
+            tabs.setStyleSheet("")
+
+        for label in self.findChildren(QLabel):
+            name = label.objectName()
+            if name == "DocumentTypeBadge":
+                label.setStyleSheet(
+                    documents_badge_style(label.text(), self._theme_mode)
+                )
+                continue
+            if name == "DocumentOriginBadge":
+                label.setStyleSheet(
+                    documents_origin_badge_style(label.text(), self._theme_mode)
+                )
+                continue
+            label.setStyleSheet("")
+
+        for table in self.findChildren(QTableWidget):
+            table.setStyleSheet(documents_table_stylesheet(palette))
+
+        if hasattr(self, "cloud_status"):
+            self.cloud_status.setObjectName(
+                "DocumentsStatusError"
+                if str(self.cloud_status.text() or "").startswith("⛔")
+                else "DocumentsStatus"
+            )
+            self.cloud_status.style().unpolish(self.cloud_status)
+            self.cloud_status.style().polish(self.cloud_status)
+
+        self._apply_quota_metric_visuals()
+
+    def _apply_quota_metric_visuals(self):
+        if not hasattr(self, "cloud_metric_values"):
+            return
+
+        quota = dict(self.cloud_document_quota or {})
+        limited = bool(quota.get("limited"))
+        can_create = bool(quota.get("can_create", True))
+        warning = limited and not can_create
+
+        documents_value = self.cloud_metric_values.get("documents")
+        documents_hint = self.cloud_metric_hints.get("documents")
+
+        if documents_value is not None:
+            documents_value.setObjectName(
+                "DocumentsMetricValueWarning"
+                if warning
+                else "DocumentsMetricValue"
+            )
+            documents_value.setStyleSheet("")
+
+        if documents_hint is not None:
+            documents_hint.setObjectName(
+                "DocumentsMetricHintWarning"
+                if warning
+                else "DocumentsMetricHint"
+            )
+            documents_hint.setStyleSheet("")
+
+        for widget in (documents_value, documents_hint):
+            if widget is not None:
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
 
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 22, 28, 26)
         root.setSpacing(14)
 
-        header_card = QFrame()
-        header_card.setObjectName("DocumentsHeader")
-        header_card.setStyleSheet(
-            "QFrame#DocumentsHeader{"
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            "stop:0 #FFFFFF, stop:0.72 #F8FBFF, stop:1 #EAF4FF);"
-            "border:1px solid #E4EBF4;"
-            "border-radius:20px;"
-            "}"
-        )
-        header = QHBoxLayout(header_card)
+        self.header_card = QFrame()
+        self.header_card.setObjectName("DocumentsHeader")
+        header = QHBoxLayout(self.header_card)
         header.setContentsMargins(22, 18, 22, 18)
-        header.setSpacing(12)
+        header.setSpacing(14)
 
         title_box = QVBoxLayout()
         title_box.setSpacing(3)
 
-        eyebrow = QLabel("DOCUMENTS  •  ESPACE DOCUMENTAIRE")
-        eyebrow.setStyleSheet(
-            "color:#338CE4; font-size:10px; font-weight:900; "
-            "letter-spacing:1.2px; background:transparent;"
-        )
+        self.header_eyebrow = QLabel("DOCUMENTS  •  CONFORMITÉ & SIGNATURES")
+        self.header_eyebrow.setObjectName("DocumentsEyebrow")
 
-        title = QLabel("Documents")
-        title.setStyleSheet(
-            "color:#0B1220; font-size:28px; font-weight:900; background:transparent;"
-        )
+        self.header_title = QLabel("Documents")
+        self.header_title.setObjectName("DocumentsTitle")
 
         self.subtitle = QLabel(
-            "Préparez le catalogue des formations et les modèles qui "
-            "alimenteront le moteur documentaire."
+            "Générez, centralisez et suivez les documents utiles à vos dossiers."
         )
+        self.subtitle.setObjectName("DocumentsSubtitle")
         self.subtitle.setWordWrap(True)
-        self.subtitle.setStyleSheet(
-            "color:#6B7A90; font-size:12px; background:transparent;"
-        )
 
-        title_box.addWidget(eyebrow)
-        title_box.addWidget(title)
+        title_box.addWidget(self.header_eyebrow)
+        title_box.addWidget(self.header_title)
         title_box.addWidget(self.subtitle)
-
         header.addLayout(title_box, 1)
 
-        self.generate_button = QPushButton("Générer des documents")
+        self.mode_chip = QLabel("●  DOCUMENTS  •  PRÊT")
+        self.mode_chip.setObjectName("DocumentsModeChip")
+        self.mode_chip.setAlignment(Qt.AlignCenter)
+        self.mode_chip.setFixedHeight(30)
+        self.mode_chip.setMinimumWidth(150)
+        header.addWidget(self.mode_chip)
+
+        self.generate_button = QPushButton("✦  Générer des documents")
+        self.generate_button.setObjectName("DocumentsPrimaryButton")
         self.generate_button.setMinimumHeight(40)
-        self.generate_button.setStyleSheet(
-            "QPushButton{background:#338CE4;color:white;border:none;border-radius:10px;"
-            "padding:0 16px;font-size:12px;font-weight:900;}"
-            "QPushButton:hover{background:#247BD0;}"
-            "QPushButton:pressed{background:#1D66B2;}"
-            "QPushButton:disabled{background:#DCE3EA;color:#7A8796;border:1px solid #CDD6E0;}"
-        )
         self.generate_button.clicked.connect(self.generate_documents)
         header.addWidget(self.generate_button)
 
-        refresh = QPushButton("Actualiser")
-        refresh.setMinimumHeight(40)
-        refresh.setStyleSheet(
-            "QPushButton{background:#FFFFFF;color:#334155;border:1px solid #DCE5EF;"
-            "border-radius:10px;padding:0 15px;font-size:12px;font-weight:850;}"
-            "QPushButton:hover{background:#F8FBFF;color:#338CE4;border-color:#AFCFF0;}"
-        )
-        refresh.clicked.connect(self.rafraichir)
-        header.addWidget(refresh)
+        self.refresh_button = QPushButton("↻  Actualiser")
+        self.refresh_button.setObjectName("DocumentsSecondaryButton")
+        self.refresh_button.setMinimumHeight(40)
+        self.refresh_button.clicked.connect(self.rafraichir)
+        header.addWidget(self.refresh_button)
 
-        root.addWidget(header_card)
+        root.addWidget(self.header_card)
 
         self.empty = QLabel("Ouvrez un projet pour accéder au moteur documentaire.")
+        self.empty.setObjectName("DocumentsEmptyState")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setWordWrap(True)
-        self.empty.setMinimumHeight(120)
-        self.empty.setStyleSheet(
-            f"background:white; color:{MUTED}; border:1px dashed {BORDER}; "
-            "border-radius:14px;"
-        )
+        self.empty.setMinimumHeight(108)
         root.addWidget(self.empty)
 
         self.cloud_content = self._build_cloud_content()
@@ -370,6 +447,7 @@ class DocumentsPage(QWidget):
         self.cloud_content.setVisible(False)
 
         self.content = QWidget()
+        self.content.setObjectName("DocumentsLocalContent")
         content_layout = QVBoxLayout(self.content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(14)
@@ -377,310 +455,309 @@ class DocumentsPage(QWidget):
         kpis = QGridLayout()
         kpis.setSpacing(10)
         self.kpi_labels = {}
-        for col, (key, caption) in enumerate(
+        self.local_metric_cards = []
+        for col, (key, caption, hint) in enumerate(
             [
-                ("trainings", "Formations"),
-                ("templates", "Modèles"),
-                ("active_templates", "Modèles actifs"),
-                ("documents", "Documents générés"),
+                ("trainings", "Formations", "Catalogue actif"),
+                ("templates", "Modèles", "Bibliothèque documentaire"),
+                ("active_templates", "Modèles actifs", "Prêts à générer"),
+                ("documents", "Documents générés", "Historique local"),
             ]
         ):
             card = self._card()
+            card.setObjectName("DocumentsMetricCard")
             box = QVBoxLayout(card)
-            label = QLabel(caption)
-            label.setStyleSheet(
-                f"color:{MUTED}; font-size:11px; font-weight:800;"
-            )
+            box.setContentsMargins(16, 13, 16, 13)
+            box.setSpacing(3)
+
+            caption_label = QLabel(caption)
+            caption_label.setObjectName("DocumentsMetricCaption")
             value = QLabel("0")
-            value.setStyleSheet(
-                f"color:{NAVY}; font-size:25px; font-weight:900;"
-            )
-            box.addWidget(label)
+            value.setObjectName("DocumentsMetricValue")
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("DocumentsMetricHint")
+
+            box.addWidget(caption_label)
             box.addWidget(value)
+            box.addWidget(hint_label)
             kpis.addWidget(card, 0, col)
             self.kpi_labels[key] = value
+            self.local_metric_cards.append(card)
+
         content_layout.addLayout(kpis)
 
-        tabs = QTabWidget()
-        tabs.setStyleSheet(
-            "QTabBar::tab{padding:10px 18px; font-weight:700;} "
-            "QTabWidget::pane{border:0;}"
-        )
-        tabs.addTab(self._build_trainings_tab(), "Catalogue des formations")
-        tabs.addTab(self._build_templates_tab(), "Modèles documentaires")
-        tabs.addTab(self._build_history_tab(), "Documents générés")
-        tabs.addTab(self._build_foundations_tab(), "Fondations RC2")
-        content_layout.addWidget(tabs, 1)
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("DocumentsTabs")
+        self.tabs.addTab(self._build_trainings_tab(), "Catalogue des formations")
+        self.tabs.addTab(self._build_templates_tab(), "Modèles documentaires")
+        self.tabs.addTab(self._build_history_tab(), "Documents générés")
+        self.tabs.addTab(self._build_foundations_tab(), "Fondations RC2")
+        content_layout.addWidget(self.tabs, 1)
+
         root.addWidget(self.content, 1)
         self.content.setVisible(False)
 
     def _build_cloud_content(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("DocumentsCloudContent")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
 
-        # ---- Synthèse Cloud
-        metrics = QHBoxLayout()
-        metrics.setSpacing(12)
+        metrics = QGridLayout()
+        metrics.setHorizontalSpacing(10)
+        metrics.setVerticalSpacing(10)
         self.cloud_metric_values = {}
         self.cloud_metric_hints = {}
+        self.cloud_metric_cards = {}
 
         metric_specs = [
             ("documents", "Documents", "Bibliothèque Cloud / limite", "📄"),
             ("generated", "Générés", "Créés par Form@Prospect", "✦"),
-            ("uploaded", "Déposés", "Administration / documents signés", "⬆"),
+            ("uploaded", "Administration", "Documents déposés", "⬆"),
+            ("signed", "Signés", "Retours clients", "✓"),
         ]
-        for key, caption, hint, icon in metric_specs:
+
+        for col, (key, caption, hint, icon) in enumerate(metric_specs):
             card = self._card()
-            card.setMinimumHeight(92)
-            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            card.setObjectName("DocumentsMetricCard")
+            card.setMinimumHeight(82)
 
             box = QVBoxLayout(card)
-            box.setContentsMargins(16, 13, 16, 13)
-            box.setSpacing(3)
+            box.setContentsMargins(14, 11, 14, 11)
+            box.setSpacing(2)
 
             top = QHBoxLayout()
             top.setSpacing(7)
+
             icon_label = QLabel(icon)
-            icon_label.setFixedSize(28, 28)
+            icon_label.setObjectName("DocumentsMetricIcon")
+            icon_label.setFixedSize(26, 26)
             icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setStyleSheet(
-                "background:#EAF4FF;border-radius:8px;font-size:14px;"
-            )
+
             caption_label = QLabel(caption)
-            caption_label.setStyleSheet(
-                "color:#53657C;font-size:11px;font-weight:850;"
-                "background:transparent;border:none;"
-            )
+            caption_label.setObjectName("DocumentsMetricCaption")
+
             top.addWidget(icon_label)
             top.addWidget(caption_label)
             top.addStretch()
 
             value = QLabel("0")
-            value.setStyleSheet(
-                "color:#0B1220;font-size:22px;font-weight:900;"
-                "background:transparent;border:none;"
-            )
+            value.setObjectName("DocumentsMetricValue")
+
             hint_label = QLabel(hint)
-            hint_label.setStyleSheet(
-                "color:#8A98AA;font-size:9px;"
-                "background:transparent;border:none;"
-            )
+            hint_label.setObjectName("DocumentsMetricHint")
 
             box.addLayout(top)
             box.addWidget(value)
             box.addWidget(hint_label)
-            metrics.addWidget(card, 1)
+
+            metrics.addWidget(card, 0, col)
             self.cloud_metric_values[key] = value
             self.cloud_metric_hints[key] = hint_label
+            self.cloud_metric_cards[key] = card
 
         layout.addLayout(metrics)
 
-        # ---- Alerte quota Cloud (visible uniquement lorsque la limite est atteinte)
         self.cloud_quota_alert = QFrame()
         self.cloud_quota_alert.setObjectName("CloudQuotaAlert")
-        self.cloud_quota_alert.setStyleSheet(
-            "QFrame#CloudQuotaAlert{"
-            "background:#FFF7ED;"
-            "border:1px solid #FDBA74;"
-            "border-radius:14px;"
-            "}"
-        )
         quota_alert_layout = QHBoxLayout(self.cloud_quota_alert)
-        quota_alert_layout.setContentsMargins(16, 13, 16, 13)
-        quota_alert_layout.setSpacing(12)
+        quota_alert_layout.setContentsMargins(15, 11, 15, 11)
+        quota_alert_layout.setSpacing(11)
 
         quota_icon = QLabel("!")
-        quota_icon.setFixedSize(32, 32)
+        quota_icon.setObjectName("CloudQuotaIcon")
+        quota_icon.setFixedSize(30, 30)
         quota_icon.setAlignment(Qt.AlignCenter)
-        quota_icon.setStyleSheet(
-            "background:#F97316;color:white;border-radius:16px;"
-            "font-size:16px;font-weight:900;"
-        )
 
         quota_text_box = QVBoxLayout()
-        quota_text_box.setSpacing(2)
+        quota_text_box.setSpacing(1)
+
         self.cloud_quota_alert_title = QLabel("Limite de bibliothèque atteinte")
-        self.cloud_quota_alert_title.setStyleSheet(
-            "color:#9A3412;font-size:12px;font-weight:900;"
-            "background:transparent;border:none;"
-        )
+        self.cloud_quota_alert_title.setObjectName("CloudQuotaTitle")
         self.cloud_quota_alert_text = QLabel("")
+        self.cloud_quota_alert_text.setObjectName("CloudQuotaText")
         self.cloud_quota_alert_text.setWordWrap(True)
-        self.cloud_quota_alert_text.setStyleSheet(
-            "color:#B54708;font-size:11px;font-weight:750;"
-            "background:transparent;border:none;"
-        )
+
         quota_text_box.addWidget(self.cloud_quota_alert_title)
         quota_text_box.addWidget(self.cloud_quota_alert_text)
-
         quota_alert_layout.addWidget(quota_icon, 0, Qt.AlignTop)
         quota_alert_layout.addLayout(quota_text_box, 1)
         self.cloud_quota_alert.setVisible(False)
         layout.addWidget(self.cloud_quota_alert)
 
-        # ---- Information
-        info = QFrame()
-        info.setObjectName("DocumentInfoCard")
-        info.setStyleSheet(
-            "QFrame#DocumentInfoCard{"
-            "background:#F4F9FF;"
-            "border:1px solid #DDEBFA;"
-            "border-radius:14px;"
-            "}"
+        workspace = QGridLayout()
+        workspace.setHorizontalSpacing(12)
+        workspace.setVerticalSpacing(12)
+        workspace.setColumnStretch(0, 0)
+        workspace.setColumnStretch(1, 1)
+
+        command_card = self._card()
+        command_card.setObjectName("DocumentsCommandCard")
+        command_card.setMinimumWidth(320)
+        command_card.setMaximumWidth(390)
+
+        command = QVBoxLayout(command_card)
+        command.setContentsMargins(18, 16, 18, 16)
+        command.setSpacing(10)
+
+        command_eyebrow = QLabel("CENTRE DOCUMENTAIRE")
+        command_eyebrow.setObjectName("DocumentsSectionEyebrow")
+        command_title = QLabel("Créer & déposer")
+        command_title.setObjectName("DocumentsSectionTitle")
+        command_help = QLabel(
+            "Choisissez le dossier concerné puis lancez l'action utile."
         )
-        info_layout = QHBoxLayout(info)
-        info_layout.setContentsMargins(16, 13, 16, 13)
-        info_layout.setSpacing(11)
+        command_help.setObjectName("DocumentsMutedText")
+        command_help.setWordWrap(True)
 
-        info_icon = QLabel("i")
-        info_icon.setFixedSize(30, 30)
-        info_icon.setAlignment(Qt.AlignCenter)
-        info_icon.setStyleSheet(
-            "background:#338CE4;color:white;border-radius:15px;"
-            "font-size:13px;font-weight:900;"
-        )
+        command.addWidget(command_eyebrow)
+        command.addWidget(command_title)
+        command.addWidget(command_help)
 
-        info_text = QLabel(
-            "Les Conventions, Programmes et Convocations sont générés avec les "
-            "modèles officiels. Les Devis, Factures et Attestations sont déposés "
-            "par l'administrateur puis téléchargés par le commercial concerné. "
-            "Le commercial peut aussi déposer les Conventions et Devis signés en PDF."
-        )
-        info_text.setWordWrap(True)
-        info_text.setStyleSheet("color:#64748B;font-size:11px;")
-
-        info_layout.addWidget(info_icon, 0, Qt.AlignTop)
-        info_layout.addWidget(info_text, 1)
-        layout.addWidget(info)
-
-        # ---- Filtres / actions
-        controls = QFrame()
-        controls.setObjectName("DocumentFilters")
-        controls.setStyleSheet(
-            "QFrame#DocumentFilters{"
-            "background:transparent;"
-            "border:none;"
-            "border-bottom:1px solid #E7EDF4;"
-            "}"
-            "QLabel{background:transparent;border:none;}"
-        )
-        controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(4, 4, 4, 12)
-        controls_layout.setSpacing(9)
-
-        controls_title = QHBoxLayout()
-        controls_title.setSpacing(8)
-
-        filters_label = QLabel("FILTRES DOCUMENTAIRES")
-        filters_label.setStyleSheet(
-            "color:#338CE4;font-size:10px;font-weight:900;letter-spacing:1px;"
-        )
-        filters_help = QLabel("Affinez les documents visibles dans l'espace Cloud")
-        filters_help.setStyleSheet("color:#94A3B8;font-size:9px;")
-        controls_title.addWidget(filters_label)
-        controls_title.addWidget(filters_help)
-        controls_title.addStretch()
-        controls_layout.addLayout(controls_title)
-
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(10)
+        filter_label = QLabel("Dossier / prospect")
+        filter_label.setObjectName("DocumentsFieldLabel")
+        command.addWidget(filter_label)
 
         self.cloud_prospect_combo = QComboBox()
-        self.cloud_prospect_combo.setMinimumWidth(280)
-        self.cloud_prospect_combo.setMaximumWidth(520)
-        self.cloud_prospect_combo.setMinimumHeight(38)
-        self.cloud_prospect_combo.setStyleSheet(
-            "QComboBox{background:white;color:#172033;border:1px solid #DCE5EF;"
-            "border-radius:9px;padding:0 34px 0 11px;font-size:11px;font-weight:700;}"
-            "QComboBox:focus{border:2px solid #338CE4;}"
-            "QComboBox::drop-down{border:none;border-left:1px solid #E6EDF5;width:28px;}"
-        )
+        self.cloud_prospect_combo.setObjectName("DocumentsInput")
+        self.cloud_prospect_combo.setMinimumHeight(40)
         self.cloud_prospect_combo.currentIndexChanged.connect(
             self._load_cloud_documents
         )
-        toolbar.addWidget(self.cloud_prospect_combo)
+        command.addWidget(self.cloud_prospect_combo)
 
-        self.cloud_history_check = QCheckBox("Afficher l'historique des versions")
-        self.cloud_history_check.setStyleSheet(
-            "QCheckBox{color:#53657C;font-size:11px;font-weight:700;spacing:7px;}"
-            "QCheckBox::indicator{width:16px;height:16px;}"
-        )
+        self.cloud_history_check = QCheckBox("Afficher aussi les anciennes versions")
+        self.cloud_history_check.setObjectName("DocumentsCheck")
         self.cloud_history_check.toggled.connect(self._load_cloud_documents)
-        toolbar.addWidget(self.cloud_history_check)
+        command.addWidget(self.cloud_history_check)
 
-        self.cloud_training_button = QPushButton("Gérer les formations")
-        self.cloud_training_button.setStyleSheet(SECONDARY_BUTTON)
-        self.cloud_training_button.clicked.connect(self._create_cloud_training)
-        toolbar.addWidget(self.cloud_training_button)
+        command.addSpacing(4)
 
-        self.cloud_template_button = QPushButton("Uploader un modèle")
-        self.cloud_template_button.setStyleSheet(SECONDARY_BUTTON)
-        self.cloud_template_button.clicked.connect(self._upload_cloud_template)
-        toolbar.addWidget(self.cloud_template_button)
-
-        self.cloud_upload_button = QPushButton("Déposer un document")
-        self.cloud_upload_button.setStyleSheet(PRIMARY_BUTTON)
+        self.cloud_upload_button = QPushButton("⬆  Déposer un document")
+        self.cloud_upload_button.setObjectName("DocumentsActionButton")
+        self.cloud_upload_button.setMinimumHeight(44)
         self.cloud_upload_button.clicked.connect(self._upload_cloud_document)
-        toolbar.addWidget(self.cloud_upload_button)
+        command.addWidget(self.cloud_upload_button)
 
-        self.cloud_signed_upload_button = QPushButton("Déposer un document signé")
-        self.cloud_signed_upload_button.setStyleSheet(PRIMARY_BUTTON)
-        self.cloud_signed_upload_button.clicked.connect(self._upload_cloud_signed_document)
-        toolbar.addWidget(self.cloud_signed_upload_button)
+        self.cloud_signed_upload_button = QPushButton("✓  Déposer une version signée")
+        self.cloud_signed_upload_button.setObjectName("DocumentsActionSuccessButton")
+        self.cloud_signed_upload_button.setMinimumHeight(44)
+        self.cloud_signed_upload_button.clicked.connect(
+            self._upload_cloud_signed_document
+        )
+        command.addWidget(self.cloud_signed_upload_button)
 
-        controls_layout.addLayout(toolbar)
-        layout.addWidget(controls)
+        manage_row = QHBoxLayout()
+        manage_row.setSpacing(8)
 
-        # ---- Liste documentaire
+        self.cloud_training_button = QPushButton("Formations")
+        self.cloud_training_button.setObjectName("DocumentsSecondaryButton")
+        self.cloud_training_button.clicked.connect(self._create_cloud_training)
+        manage_row.addWidget(self.cloud_training_button)
+
+        self.cloud_template_button = QPushButton("Modèles")
+        self.cloud_template_button.setObjectName("DocumentsSecondaryButton")
+        self.cloud_template_button.clicked.connect(self._upload_cloud_template)
+        manage_row.addWidget(self.cloud_template_button)
+
+        command.addLayout(manage_row)
+
+        self.cloud_info_card = QFrame()
+        self.cloud_info_card.setObjectName("DocumentInfoCard")
+        info_layout = QHBoxLayout(self.cloud_info_card)
+        info_layout.setContentsMargins(11, 10, 11, 10)
+        info_layout.setSpacing(9)
+
+        info_icon = QLabel("i")
+        info_icon.setObjectName("DocumentInfoIcon")
+        info_icon.setFixedSize(24, 24)
+        info_icon.setAlignment(Qt.AlignCenter)
+
+        self.cloud_info_text = QLabel(
+            "Conventions, Programmes et Convocations sont générés depuis les "
+            "modèles officiels. Les versions signées restent centralisées ici."
+        )
+        self.cloud_info_text.setObjectName("DocumentInfoText")
+        self.cloud_info_text.setWordWrap(True)
+
+        info_layout.addWidget(info_icon, 0, Qt.AlignTop)
+        info_layout.addWidget(self.cloud_info_text, 1)
+
+        command.addWidget(self.cloud_info_card)
+        command.addStretch()
+
+        workspace.addWidget(command_card, 0, 0)
+
         documents_card = self._card()
+        documents_card.setObjectName("DocumentsLibraryCard")
         documents_layout = QVBoxLayout(documents_card)
-        documents_layout.setContentsMargins(14, 12, 14, 14)
-        documents_layout.setSpacing(8)
+        documents_layout.setContentsMargins(18, 15, 18, 14)
+        documents_layout.setSpacing(10)
 
         list_top = QHBoxLayout()
+        list_top.setSpacing(10)
+
         list_title_box = QVBoxLayout()
         list_title_box.setSpacing(1)
 
         list_eyebrow = QLabel("BIBLIOTHÈQUE CLOUD")
-        list_eyebrow.setStyleSheet(
-            "color:#338CE4;font-size:9px;font-weight:900;letter-spacing:1px;"
-            "background:transparent;border:none;"
-        )
-        list_title = QLabel("Documents disponibles")
-        list_title.setStyleSheet(
-            "color:#0B1220;font-size:16px;font-weight:900;"
-            "background:transparent;border:none;"
-        )
+        list_eyebrow.setObjectName("DocumentsSectionEyebrow")
+        list_title = QLabel("Vos documents")
+        list_title.setObjectName("DocumentsSectionTitle")
         list_title_box.addWidget(list_eyebrow)
         list_title_box.addWidget(list_title)
 
         self.cloud_count_badge = QLabel("0 documents")
+        self.cloud_count_badge.setObjectName("DocumentsCountBadge")
         self.cloud_count_badge.setAlignment(Qt.AlignCenter)
         self.cloud_count_badge.setMinimumWidth(92)
         self.cloud_count_badge.setFixedHeight(28)
-        self.cloud_count_badge.setStyleSheet(
-            "background:#EAF4FF;color:#0B5EA8;border:1px solid #BFDDFC;"
-            "border-radius:9px;padding:0 10px;font-size:10px;font-weight:900;"
-        )
-
-        self.cloud_status = QLabel("Sélectionnez un document puis choisissez DOCX ou PDF")
-        self.cloud_status.setWordWrap(True)
-        self.cloud_status.setMaximumWidth(620)
-        self.cloud_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.cloud_status.setStyleSheet(
-            "color:#8A98AA;font-size:9px;font-weight:700;"
-            "background:transparent;border:none;"
-        )
 
         list_top.addLayout(list_title_box)
         list_top.addStretch()
-        list_top.addWidget(self.cloud_status)
         list_top.addWidget(self.cloud_count_badge)
         documents_layout.addLayout(list_top)
 
+        self.cloud_status = QLabel(
+            "Sélectionnez un document puis choisissez l'action à effectuer."
+        )
+        self.cloud_status.setObjectName("DocumentsStatus")
+        self.cloud_status.setWordWrap(True)
+        documents_layout.addWidget(self.cloud_status)
+
+        self.cloud_empty_state = QFrame()
+        self.cloud_empty_state.setObjectName("DocumentsLibraryEmpty")
+        empty_layout = QVBoxLayout(self.cloud_empty_state)
+        empty_layout.setContentsMargins(24, 28, 24, 28)
+        empty_layout.setSpacing(7)
+        empty_layout.setAlignment(Qt.AlignCenter)
+
+        empty_icon = QLabel("✦")
+        empty_icon.setObjectName("DocumentsEmptyIcon")
+        empty_icon.setFixedSize(46, 46)
+        empty_icon.setAlignment(Qt.AlignCenter)
+
+        empty_title = QLabel("Votre bibliothèque est prête")
+        empty_title.setObjectName("DocumentsEmptyTitle")
+        empty_title.setAlignment(Qt.AlignCenter)
+
+        empty_text = QLabel(
+            "Générez un document ou déposez un fichier pour commencer à "
+            "centraliser votre dossier."
+        )
+        empty_text.setObjectName("DocumentsEmptyText")
+        empty_text.setAlignment(Qt.AlignCenter)
+        empty_text.setWordWrap(True)
+        empty_text.setMaximumWidth(520)
+
+        empty_layout.addWidget(empty_icon, 0, Qt.AlignCenter)
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(empty_text)
+        documents_layout.addWidget(self.cloud_empty_state, 1)
+
         self.cloud_table = QTableWidget(0, 8)
+        self.cloud_table.setObjectName("DocumentsTable")
         self.cloud_table.setHorizontalHeaderLabels(
             [
                 "Sélection",
@@ -699,49 +776,46 @@ class DocumentsPage(QWidget):
         )
         self.cloud_table.itemChanged.connect(self._cloud_document_check_changed)
         self.cloud_table.doubleClicked.connect(self._download_cloud_document)
+        self.cloud_table.setVisible(False)
         documents_layout.addWidget(self.cloud_table, 1)
 
-        actions = QHBoxLayout()
+        self.cloud_actions_bar = QFrame()
+        self.cloud_actions_bar.setObjectName("DocumentsSelectionBar")
+        actions = QHBoxLayout(self.cloud_actions_bar)
+        actions.setContentsMargins(0, 8, 0, 0)
         actions.setSpacing(8)
 
         self.cloud_select_all_button = QPushButton("Tout sélectionner")
+        self.cloud_select_all_button.setObjectName("DocumentsSecondaryButton")
         self.cloud_select_all_button.setMinimumHeight(36)
-        self.cloud_select_all_button.setStyleSheet(SECONDARY_BUTTON)
         self.cloud_select_all_button.clicked.connect(
             lambda: self._set_all_cloud_document_checks(True)
         )
         actions.addWidget(self.cloud_select_all_button)
 
         self.cloud_unselect_all_button = QPushButton("Tout désélectionner")
+        self.cloud_unselect_all_button.setObjectName("DocumentsSecondaryButton")
         self.cloud_unselect_all_button.setMinimumHeight(36)
-        self.cloud_unselect_all_button.setStyleSheet(SECONDARY_BUTTON)
         self.cloud_unselect_all_button.clicked.connect(
             lambda: self._set_all_cloud_document_checks(False)
         )
         actions.addWidget(self.cloud_unselect_all_button)
 
         self.cloud_delete_button = QPushButton("Supprimer la sélection")
+        self.cloud_delete_button.setObjectName("DocumentsDangerButton")
         self.cloud_delete_button.setMinimumHeight(36)
         self.cloud_delete_button.setEnabled(False)
-        self.cloud_delete_button.setStyleSheet(
-            "QPushButton{background:#FFFFFF;color:#B42318;border:1px solid #F3B5AE;"
-            "border-radius:9px;padding:0 14px;font-size:11px;font-weight:900;}"
-            "QPushButton:hover{background:#FFF4F2;border-color:#E58C82;}"
-            "QPushButton:disabled{background:#F8FAFC;color:#AAB4C2;border-color:#E5EAF0;}"
+        self.cloud_delete_button.clicked.connect(
+            self._delete_selected_cloud_documents
         )
-        self.cloud_delete_button.clicked.connect(self._delete_selected_cloud_documents)
         actions.addWidget(self.cloud_delete_button)
 
         actions.addStretch()
-        self.cloud_download_button = QPushButton("Télécharger le document")
+
+        self.cloud_download_button = QPushButton("Télécharger")
+        self.cloud_download_button.setObjectName("DocumentsPrimaryButton")
         self.cloud_download_button.setMinimumHeight(38)
         self.cloud_download_button.setEnabled(False)
-        self.cloud_download_button.setStyleSheet(
-            "QPushButton{background:#338CE4;color:white;border:none;border-radius:9px;"
-            "padding:0 16px;font-size:11px;font-weight:900;}"
-            "QPushButton:hover{background:#247BD0;}"
-            "QPushButton:disabled{background:#DCE6F0;color:#94A3B8;}"
-        )
         self.cloud_download_button.clicked.connect(self._download_cloud_document)
         self.cloud_table.itemSelectionChanged.connect(
             lambda: self.cloud_download_button.setEnabled(
@@ -750,8 +824,11 @@ class DocumentsPage(QWidget):
         )
         actions.addWidget(self.cloud_download_button)
 
-        documents_layout.addLayout(actions)
-        layout.addWidget(documents_card, 1)
+        self.cloud_actions_bar.setVisible(False)
+        documents_layout.addWidget(self.cloud_actions_bar)
+
+        workspace.addWidget(documents_card, 0, 1)
+        layout.addLayout(workspace, 1)
         return page
 
     def _build_trainings_tab(self) -> QWidget:
@@ -1015,12 +1092,15 @@ class DocumentsPage(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 14, 0, 0)
+
         card = self._card()
         box = QVBoxLayout(card)
         box.setContentsMargins(22, 20, 22, 20)
         box.setSpacing(10)
+
         heading = QLabel("Fondations installées")
-        heading.setStyleSheet(f"color:{TEXT}; font-size:18px; font-weight:900;")
+        heading.setObjectName("DocumentsSectionTitle")
+
         text = QLabel(
             "✓ Catalogue des formations\n"
             "✓ Gestion des modèles Devis, Convention, Programme, Convocation, "
@@ -1032,8 +1112,9 @@ class DocumentsPage(QWidget):
             "et convocation\n"
             "✓ Fusion des variables et classement automatique dans le dossier client"
         )
+        text.setObjectName("DocumentsMutedText")
         text.setWordWrap(True)
-        text.setStyleSheet(f"color:{MUTED}; font-size:13px; line-height:1.5;")
+
         box.addWidget(heading)
         box.addWidget(text)
         box.addStretch()
@@ -1041,41 +1122,11 @@ class DocumentsPage(QWidget):
         layout.addStretch()
         return page
 
-    @staticmethod
-    def _document_type_badge_style(doc_type: str) -> str:
-        value = (doc_type or "").strip().lower()
+    def _document_type_badge_style(self, doc_type: str) -> str:
+        return documents_badge_style(doc_type, self._theme_mode)
 
-        palette = {
-            "convention": ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
-            "convocation": ("#F5F3FF", "#6D28D9", "#DDD6FE"),
-            "programme": ("#FFF7ED", "#C2410C", "#FED7AA"),
-            "devis": ("#F0FDF4", "#15803D", "#BBF7D0"),
-            "facture": ("#ECFDF5", "#047857", "#A7F3D0"),
-            "attestation de formation": ("#FFF7ED", "#B45309", "#FDE68A"),
-        }
-        bg, fg, border = palette.get(
-            value,
-            ("#F8FAFC", "#475569", "#E2E8F0"),
-        )
-        return (
-            f"background:{bg};color:{fg};border:1px solid {border};"
-            "border-radius:9px;padding:3px 8px;font-size:9px;font-weight:900;"
-        )
-
-    @staticmethod
-    def _document_origin_badge_style(origin: str) -> str:
-        value = (origin or "").strip().lower()
-
-        if "généré" in value or "genere" in value:
-            return (
-                "background:#ECFDF5;color:#047857;border:1px solid #A7F3D0;"
-                "border-radius:9px;padding:3px 8px;font-size:9px;font-weight:900;"
-            )
-
-        return (
-            "background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;"
-            "border-radius:9px;padding:3px 8px;font-size:9px;font-weight:900;"
-        )
+    def _document_origin_badge_style(self, origin: str) -> str:
+        return documents_origin_badge_style(origin, self._theme_mode)
 
     def _style_table(self, table: QTableWidget):
         table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -1089,33 +1140,9 @@ class DocumentsPage(QWidget):
         table.setShowGrid(False)
         table.setFocusPolicy(Qt.NoFocus)
         table.setStyleSheet(
-            "QTableWidget{"
-            "background:#FFFFFF;"
-            "color:#172033;"
-            "border:1px solid #E4EBF4;"
-            "border-radius:12px;"
-            "selection-background-color:#EAF4FF;"
-            "selection-color:#0B1220;"
-            "font-size:11px;"
-            "}"
-            "QTableWidget::item{"
-            "background:#FFFFFF;"
-            "border-bottom:1px solid #EEF3F8;"
-            "padding:7px 8px;"
-            "}"
-            "QTableWidget::item:selected{"
-            "background:#EAF4FF;"
-            "color:#0B1220;"
-            "}"
-            "QHeaderView::section{"
-            "background:#0B2A52;"
-            "color:#FFFFFF;"
-            "border:none;"
-            "border-right:1px solid #173C68;"
-            "padding:9px 8px;"
-            "font-size:10px;"
-            "font-weight:900;"
-            "}"
+            documents_table_stylesheet(
+                documents_palette(self._theme_mode)
+            )
         )
 
     def rafraichir(self):
@@ -1131,6 +1158,7 @@ class DocumentsPage(QWidget):
             return
 
         self.cloud_content.setVisible(False)
+        self.mode_chip.setText("●  LOCAL  •  ACTIF")
         self.subtitle.setText(
             "Préparez le catalogue des formations et les modèles qui "
             "alimenteront le moteur documentaire."
@@ -1171,6 +1199,7 @@ class DocumentsPage(QWidget):
         self.content.setVisible(False)
         self.empty.setVisible(False)
         self.cloud_content.setVisible(True)
+        self.mode_chip.setText("●  CLOUD PRIVÉ  •  LIVE")
         self.subtitle.setText(
             "Générez, déposez et téléchargez les documents depuis l'espace Cloud privé."
         )
@@ -1197,8 +1226,14 @@ class DocumentsPage(QWidget):
             ).items
         except CloudAPIError as exc:
             self.cloud_status.setText(f"⛔ {exc}")
-            self.cloud_status.setStyleSheet("color:#B42318;")
+            self.cloud_status.setObjectName("DocumentsStatusError")
+            self.cloud_status.setStyleSheet("")
             self.cloud_table.setRowCount(0)
+            if hasattr(self, "cloud_empty_state"):
+                self.cloud_empty_state.setVisible(True)
+            if hasattr(self, "cloud_actions_bar"):
+                self.cloud_actions_bar.setVisible(False)
+            self.cloud_table.setVisible(False)
             return
 
         self.cloud_prospect_names = {
@@ -1238,8 +1273,14 @@ class DocumentsPage(QWidget):
             )
         except CloudAPIError as exc:
             self.cloud_status.setText(f"⛔ {exc}")
-            self.cloud_status.setStyleSheet("color:#B42318;")
+            self.cloud_status.setObjectName("DocumentsStatusError")
+            self.cloud_status.setStyleSheet("")
             self.cloud_table.setRowCount(0)
+            if hasattr(self, "cloud_empty_state"):
+                self.cloud_empty_state.setVisible(True)
+            if hasattr(self, "cloud_actions_bar"):
+                self.cloud_actions_bar.setVisible(False)
+            self.cloud_table.setVisible(False)
             self.cloud_document_quota = {}
             self.generate_button.setText("Générer des documents")
             self.generate_button.setEnabled(False)
@@ -1252,7 +1293,16 @@ class DocumentsPage(QWidget):
             1 for item in self.cloud_documents
             if item.get("origin") == "generated"
         )
-        uploaded_count = len(self.cloud_documents) - generated_count
+        signed_count = sum(
+            1
+            for item in self.cloud_documents
+            if item.get("origin") != "generated"
+            and "sign" in str(item.get("storage_path") or "").lower()
+        )
+        uploaded_count = max(
+            0,
+            len(self.cloud_documents) - generated_count - signed_count,
+        )
 
         quota_count = int(self.cloud_document_quota.get("count") or 0)
         quota_limit = self.cloud_document_quota.get("limit")
@@ -1269,37 +1319,24 @@ class DocumentsPage(QWidget):
             documents_value = str(quota_count)
             if quota_limited and quota_limit:
                 documents_value = f"{quota_count} / {quota_limit}"
+
             self.cloud_metric_values["documents"].setText(documents_value)
             self.cloud_metric_values["generated"].setText(str(generated_count))
             self.cloud_metric_values["uploaded"].setText(str(uploaded_count))
+            self.cloud_metric_values["signed"].setText(str(signed_count))
 
-            if quota_limited and not quota_can_create:
-                self.cloud_metric_values["documents"].setStyleSheet(
-                    "color:#C2410C;font-size:22px;font-weight:900;"
-                    "background:transparent;border:none;"
-                )
-                if hasattr(self, "cloud_metric_hints"):
+            if hasattr(self, "cloud_metric_hints"):
+                if quota_limited and not quota_can_create:
                     suffix = "document" if documents_to_delete == 1 else "documents"
                     self.cloud_metric_hints["documents"].setText(
                         f"Limite atteinte • Supprimez {documents_to_delete} {suffix} minimum"
                     )
-                    self.cloud_metric_hints["documents"].setStyleSheet(
-                        "color:#B54708;font-size:9px;font-weight:800;"
-                        "background:transparent;border:none;"
-                    )
-            else:
-                self.cloud_metric_values["documents"].setStyleSheet(
-                    "color:#0B1220;font-size:22px;font-weight:900;"
-                    "background:transparent;border:none;"
-                )
-                if hasattr(self, "cloud_metric_hints"):
+                else:
                     self.cloud_metric_hints["documents"].setText(
                         "Bibliothèque Cloud / limite"
                     )
-                    self.cloud_metric_hints["documents"].setStyleSheet(
-                        "color:#8A98AA;font-size:9px;"
-                        "background:transparent;border:none;"
-                    )
+
+            self._apply_quota_metric_visuals()
 
         can_generate = self._can_generate_cloud()
         self.generate_button.setEnabled(can_generate and quota_can_create)
@@ -1377,6 +1414,7 @@ class DocumentsPage(QWidget):
                         self.cloud_table.setItem(row_index, column, item)
 
                         type_badge = QLabel(str(value))
+                        type_badge.setObjectName("DocumentTypeBadge")
                         type_badge.setAlignment(Qt.AlignCenter)
                         type_badge.setFixedHeight(26)
                         type_badge.setStyleSheet(
@@ -1389,6 +1427,7 @@ class DocumentsPage(QWidget):
                         self.cloud_table.setItem(row_index, column, item)
 
                         origin_badge = QLabel(str(value))
+                        origin_badge.setObjectName("DocumentOriginBadge")
                         origin_badge.setAlignment(Qt.AlignCenter)
                         origin_badge.setFixedHeight(26)
                         origin_badge.setStyleSheet(
@@ -1412,6 +1451,13 @@ class DocumentsPage(QWidget):
             self.cloud_table.blockSignals(False)
 
         count = len(self.cloud_documents)
+        has_documents = count > 0
+        self.cloud_table.setVisible(has_documents)
+        if hasattr(self, "cloud_empty_state"):
+            self.cloud_empty_state.setVisible(not has_documents)
+        if hasattr(self, "cloud_actions_bar"):
+            self.cloud_actions_bar.setVisible(has_documents)
+
         if hasattr(self, "cloud_count_badge"):
             self.cloud_count_badge.setText(
                 f"{count} document" if count == 1 else f"{count} documents"
@@ -1423,16 +1469,16 @@ class DocumentsPage(QWidget):
                 f"⚠ Limite atteinte : {quota_count} / {quota_limit}. "
                 f"Supprimez au moins {documents_to_delete} {suffix}."
             )
-            self.cloud_status.setStyleSheet(
-                "color:#B54708;font-size:9px;font-weight:800;"
-            )
+            self.cloud_status.setObjectName("DocumentsStatusError")
         else:
             self.cloud_status.setText(
                 "Sélectionnez un document puis choisissez DOCX ou PDF"
             )
-            self.cloud_status.setStyleSheet(
-                "color:#8A98AA;font-size:9px;font-weight:700;"
-            )
+            self.cloud_status.setObjectName("DocumentsStatus")
+
+        self.cloud_status.setStyleSheet("")
+        self.cloud_status.style().unpolish(self.cloud_status)
+        self.cloud_status.style().polish(self.cloud_status)
 
     def _checked_cloud_document_ids(self) -> list[str]:
         selected: list[str] = []

@@ -342,6 +342,604 @@ def widget_styles(mode: str) -> dict[str, str]:
     }
 
 
+
+def assistant_page_palette(mode: str) -> dict[str, str]:
+    """Palette du cockpit Assistant IA, sans modifier sa structure."""
+    normalized = normalize_theme_mode(mode)
+    base = theme_values(normalized)
+    dark = normalized == THEME_UI_DARK
+    classic = normalized == THEME_CLASSIC
+
+    return {
+        **base,
+        "page": base["bg"],
+        "surface": base["surface"],
+        "surface_alt": base["surface_2"],
+        "surface_soft": base["surface_3"],
+        "border_strong": "#2C5D87" if dark else ("#C7D9EA" if classic else "#AACCE8"),
+        "primary_soft": "#102E4B" if dark else "#EAF4FF",
+        "primary_text": "#8FD4FF" if dark else "#1473C9",
+        "hero_1": "#06182D" if dark else "#071C35",
+        "hero_2": "#0A2749" if dark else "#0B2A52",
+        "hero_3": "#123D64" if dark else "#145A91",
+        "hero_border": "#24567E" if dark else "#173F6D",
+        "hero_text": "#FFFFFF",
+        "hero_soft": "#C7D8EA",
+        "success_soft": "#102B22" if dark else "#E9FFF3",
+        "success_text": "#74E6AF" if dark else "#087A45",
+        "success_border": "#215F49" if dark else "#A7F3D0",
+        "blue_soft": "#102B46" if dark else "#EEF6FF",
+        "blue_text": "#8ED4FF" if dark else "#1473C9",
+        "amber_soft": "#2D2115" if dark else "#FFF7ED",
+        "amber_text": "#F4BC78" if dark else "#B85D10",
+        "red_soft": "#321B24" if dark else "#FFF1F2",
+        "red_text": "#FF9AA7" if dark else "#DC3545",
+        "violet_soft": "#251D43" if dark else "#F5F3FF",
+        "violet_text": "#BDB0FF" if dark else "#7250D6",
+        "green_soft": "#102A22" if dark else "#ECFDF5",
+        "green_text": "#75DDB3" if dark else "#0F8A59",
+        "table_header": "#0A2749" if dark else "#081F3D",
+        "table_header_border": "#183D5D" if dark else "#153B67",
+        "selection": "#123A60" if dark else "#E9F4FF",
+        "selection_text": "#F4F9FF" if dark else "#0B2A52",
+        "scroll_handle": "#34516E" if dark else "#CBD5E1",
+        "scroll_hover": "#496B8D" if dark else "#94A3B8",
+        "shadow": "rgba(3, 15, 28, 0.35)" if dark else "rgba(30, 91, 145, 0.08)",
+    }
+
+
+def assistant_page_stylesheet(p: dict[str, str]) -> str:
+    """QSS unique : même structure en Classique, UI Clair et UI Sombre."""
+    return f"""
+    QWidget#AIAssistantRoot,
+    QWidget#AiViewport,
+    QWidget#AiMainContent {{
+        background:{p["page"]};
+        color:{p["text"]};
+    }}
+
+    QWidget#AiConsoleBody {{
+        background:transparent;
+        color:{p["text"]};
+    }}
+
+    QScrollArea#AiPageScroll {{
+        border:none;
+        background:{p["page"]};
+    }}
+
+    QScrollArea#AiPageScroll QWidget#qt_scrollarea_viewport {{
+        background:{p["page"]};
+    }}
+
+    QScrollBar:vertical {{
+        background:transparent;
+        width:10px;
+        margin:4px 2px;
+    }}
+    QScrollBar::handle:vertical {{
+        background:{p["scroll_handle"]};
+        min-height:40px;
+        border-radius:5px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background:{p["scroll_hover"]};
+    }}
+    QScrollBar::add-line:vertical,
+    QScrollBar::sub-line:vertical {{
+        height:0;
+    }}
+
+    QFrame#AiHero {{
+        background:qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 {p["hero_1"]},
+            stop:0.52 {p["hero_2"]},
+            stop:1 {p["hero_3"]}
+        );
+        border:1px solid {p["hero_border"]};
+        border-radius:22px;
+    }}
+
+    QFrame#AiOrb {{
+        background:qradialgradient(
+            cx:.35, cy:.28, radius:.82,
+            stop:0 #78CAFF,
+            stop:.28 #338CE4,
+            stop:.72 #145A91,
+            stop:1 #0B2A52
+        );
+        border:1px solid #75C8FF;
+        border-radius:38px;
+    }}
+
+    QLabel#AiOrbGlyph {{
+        color:#FFFFFF;
+        background:transparent;
+        border:none;
+        font-size:31px;
+        font-weight:950;
+    }}
+
+    QLabel#AiHeroEyebrow {{
+        color:#79C7FF;
+        background:transparent;
+        border:none;
+        font-size:9px;
+        font-weight:900;
+        letter-spacing:1.3px;
+    }}
+
+    QLabel#AiHeroTitle {{
+        color:#FFFFFF;
+        background:transparent;
+        border:none;
+        font-size:29px;
+        font-weight:950;
+    }}
+
+    QLabel#AiHeroSubtitle {{
+        color:{p["hero_soft"]};
+        background:transparent;
+        border:none;
+        font-size:11px;
+    }}
+
+    QLabel#AiLiveBadge {{
+        background:{p["success_soft"]};
+        color:{p["success_text"]};
+        border:1px solid {p["success_border"]};
+        border-radius:11px;
+        padding:0 12px;
+        font-size:9px;
+        font-weight:900;
+    }}
+
+    QLabel#AiPrivacyBadge {{
+        color:#D7E7F8;
+        background:rgba(255,255,255,0.07);
+        border:1px solid rgba(255,255,255,0.14);
+        border-radius:11px;
+        padding:8px 12px;
+        font-size:9px;
+        font-weight:750;
+    }}
+
+    QLabel#AiEmptyState {{
+        background:{p["surface_alt"]};
+        color:{p["muted"]};
+        border:1px dashed {p["border_strong"]};
+        border-radius:16px;
+        padding:14px 18px;
+        font-size:11px;
+        font-weight:750;
+    }}
+
+    QFrame[aiMetric="true"],
+    QFrame#AiRadarCard,
+    QFrame#AiConsole,
+    QFrame#AiOutputCard,
+    QFrame[aiFeedCard="true"] {{
+        background:{p["surface"]};
+        border:1px solid {p["border"]};
+        border-radius:18px;
+    }}
+
+    QLabel[aiMetricName="true"],
+    QLabel[aiSectionSubtitle="true"],
+    QLabel#AiResultsLabel,
+    QLabel[aiToolbarHint="true"],
+    QLabel#AiOutputSubtitle {{
+        color:{p["muted"]};
+        background:transparent;
+        border:none;
+        font-size:9px;
+    }}
+
+    QLabel[aiMetricValue="true"] {{
+        color:{p["text"]};
+        background:transparent;
+        border:none;
+        font-size:26px;
+        font-weight:950;
+    }}
+
+    QLabel[aiMetricCaption="true"] {{
+        color:{p["muted"]};
+        background:transparent;
+        border:none;
+        font-size:8px;
+    }}
+
+    QLabel[aiMetricIcon="true"] {{
+        border:none;
+        border-radius:9px;
+        font-size:12px;
+        font-weight:950;
+    }}
+    QLabel[aiMetricIcon="true"][aiTone="blue"] {{
+        background:{p["blue_soft"]}; color:{p["blue_text"]};
+    }}
+    QLabel[aiMetricIcon="true"][aiTone="amber"] {{
+        background:{p["amber_soft"]}; color:{p["amber_text"]};
+    }}
+    QLabel[aiMetricIcon="true"][aiTone="red"] {{
+        background:{p["red_soft"]}; color:{p["red_text"]};
+    }}
+    QLabel[aiMetricIcon="true"][aiTone="violet"] {{
+        background:{p["violet_soft"]}; color:{p["violet_text"]};
+    }}
+
+    QFrame[aiMetricAccent="true"] {{
+        border:none;
+        border-radius:1px;
+    }}
+    QFrame[aiMetricAccent="true"][aiTone="blue"] {{ background:{p["blue_text"]}; }}
+    QFrame[aiMetricAccent="true"][aiTone="amber"] {{ background:{p["amber_text"]}; }}
+    QFrame[aiMetricAccent="true"][aiTone="red"] {{ background:{p["red_text"]}; }}
+    QFrame[aiMetricAccent="true"][aiTone="violet"] {{ background:{p["violet_text"]}; }}
+
+    QLabel[aiOverline="true"] {{
+        color:{p["primary_text"]};
+        background:transparent;
+        border:none;
+        font-size:9px;
+        font-weight:900;
+        letter-spacing:1px;
+    }}
+
+    QLabel[aiSectionTitle="true"],
+    QLabel[aiFeedTitle="true"] {{
+        color:{p["text"]};
+        background:transparent;
+        border:none;
+        font-size:16px;
+        font-weight:950;
+    }}
+
+    QLabel#AiRadarLive {{
+        background:{p["success_soft"]};
+        color:{p["success_text"]};
+        border:1px solid {p["success_border"]};
+        border-radius:8px;
+        font-size:8px;
+        font-weight:900;
+    }}
+
+    QFrame#AiSearchShell {{
+        background:{p["surface_alt"]};
+        border:1px solid {p["border"]};
+        border-radius:11px;
+    }}
+
+    QLabel#AiSearchIcon {{
+        color:{p["primary"]};
+        background:transparent;
+        border:none;
+        font-size:17px;
+        font-weight:900;
+    }}
+
+    QLineEdit#AiSearchInput {{
+        background:transparent;
+        color:{p["text"]};
+        border:none;
+        padding:0 3px;
+        font-size:10px;
+    }}
+
+    QLabel[aiControlLabel="true"] {{
+        color:{p["muted"]};
+        background:transparent;
+        border:none;
+        font-size:8px;
+        font-weight:900;
+        letter-spacing:.6px;
+    }}
+
+    QComboBox#AiLimitCombo {{
+        background:{p["surface"]};
+        color:{p["text_soft"]};
+        border:1px solid {p["border"]};
+        border-radius:8px;
+        padding:3px 8px;
+        font-size:9px;
+        font-weight:850;
+    }}
+    QComboBox#AiLimitCombo:hover {{
+        border-color:{p["border_strong"]};
+        background:{p["surface_alt"]};
+    }}
+    QComboBox#AiLimitCombo::drop-down {{
+        border:none;
+        width:20px;
+    }}
+    QComboBox#AiLimitCombo QAbstractItemView {{
+        background:{p["surface"]};
+        color:{p["text"]};
+        border:1px solid {p["border"]};
+        selection-background-color:{p["selection"]};
+        selection-color:{p["selection_text"]};
+        outline:0;
+    }}
+
+    QTableWidget#AiProspectTable {{
+        background:{p["surface"]};
+        color:{p["text_soft"]};
+        border:1px solid {p["border"]};
+        border-radius:12px;
+        selection-background-color:{p["selection"]};
+        selection-color:{p["selection_text"]};
+        outline:none;
+        font-size:9px;
+    }}
+    QTableWidget#AiProspectTable QHeaderView::section {{
+        background:{p["table_header"]};
+        color:#FFFFFF;
+        border:none;
+        border-right:1px solid {p["table_header_border"]};
+        padding:10px 7px;
+        font-size:8px;
+        font-weight:900;
+    }}
+    QTableWidget#AiProspectTable::item {{
+        background:{p["surface"]};
+        border:none;
+        border-bottom:1px solid {p["border"]};
+        padding:9px 7px;
+    }}
+    QTableWidget#AiProspectTable::item:hover {{
+        background:{p["surface_alt"]};
+    }}
+    QTableWidget#AiProspectTable::item:selected {{
+        background:{p["selection"]};
+        color:{p["selection_text"]};
+        border-left:3px solid #338CE4;
+    }}
+
+    QFrame#ProspectHero {{
+        background:qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 {p["hero_1"]},
+            stop:1 {p["hero_3"]}
+        );
+        border:none;
+        border-top-left-radius:17px;
+        border-top-right-radius:17px;
+    }}
+
+    QLabel#AiProspectEyebrow {{
+        color:#79C7FF;
+        background:transparent;
+        border:none;
+        font-size:8px;
+        font-weight:900;
+        letter-spacing:1px;
+    }}
+    QLabel#AiSelectedTitle {{
+        color:#FFFFFF;
+        background:transparent;
+        border:none;
+        font-size:20px;
+        font-weight:950;
+    }}
+    QLabel#AiSelectedMeta {{
+        color:#BFD1E4;
+        background:transparent;
+        border:none;
+        font-size:9px;
+    }}
+
+    QFrame#CopilotSummary {{
+        background:{p["primary_soft"]};
+        border:1px solid {p["border_strong"]};
+        border-radius:13px;
+    }}
+    QLabel#AiCopilotCaption {{
+        color:{p["primary_text"]};
+        background:transparent;
+        border:none;
+        font-size:8px;
+        font-weight:900;
+        letter-spacing:.7px;
+    }}
+    QLabel#AiAnalysisChip {{
+        background:{p["surface"]};
+        color:{p["primary_text"]};
+        border:1px solid {p["border_strong"]};
+        border-radius:7px;
+        padding:0 8px;
+        font-size:7px;
+        font-weight:900;
+    }}
+    QLabel[aiCopilotLine="true"] {{
+        color:{p["text_soft"]};
+        background:transparent;
+        border:none;
+        font-size:9px;
+        font-weight:750;
+    }}
+
+    QPushButton[aiPrimaryButton="true"],
+    QPushButton[aiDarkButton="true"] {{
+        border-radius:10px;
+        padding:0 14px;
+        font-size:10px;
+        font-weight:900;
+    }}
+    QPushButton[aiPrimaryButton="true"] {{
+        background:#338CE4;
+        color:#FFFFFF;
+        border:1px solid #5FAFF5;
+    }}
+    QPushButton[aiPrimaryButton="true"]:hover {{
+        background:#287FD4;
+        border-color:#86C8FF;
+    }}
+    QPushButton[aiDarkButton="true"] {{
+        background:{p["hero_1"]};
+        color:#FFFFFF;
+        border:1px solid {p["hero_border"]};
+    }}
+    QPushButton[aiDarkButton="true"]:hover {{
+        background:{p["hero_3"]};
+        border-color:#338CE4;
+    }}
+
+    QFrame#AiToolsShell {{
+        background:{p["surface_alt"]};
+        border:1px solid {p["border"]};
+        border-radius:13px;
+    }}
+
+    QLabel[aiToolbarTitle="true"] {{
+        color:{p["text_soft"]};
+        background:transparent;
+        border:none;
+        font-size:9px;
+        font-weight:900;
+        letter-spacing:.8px;
+    }}
+
+    QFrame[aiFamilyCard="true"] {{
+        background:{p["surface"]};
+        border:1px solid {p["border"]};
+        border-radius:11px;
+    }}
+    QFrame[aiFamilyCard="true"]:hover {{
+        border-color:{p["border_strong"]};
+        background:{p["surface_soft"]};
+    }}
+
+    QLabel[aiFamilyBadge="true"] {{
+        border:none;
+        border-radius:7px;
+        font-size:11px;
+        font-weight:900;
+    }}
+    QLabel[aiFamilyBadge="true"][aiFamilyTone="blue"] {{
+        background:{p["blue_soft"]}; color:{p["blue_text"]};
+    }}
+    QLabel[aiFamilyBadge="true"][aiFamilyTone="amber"] {{
+        background:{p["amber_soft"]}; color:{p["amber_text"]};
+    }}
+    QLabel[aiFamilyBadge="true"][aiFamilyTone="violet"] {{
+        background:{p["violet_soft"]}; color:{p["violet_text"]};
+    }}
+    QLabel[aiFamilyBadge="true"][aiFamilyTone="green"] {{
+        background:{p["green_soft"]}; color:{p["green_text"]};
+    }}
+
+    QLabel[aiFamilyLabel="true"] {{
+        background:transparent;
+        border:none;
+        font-size:9px;
+        font-weight:900;
+        letter-spacing:.6px;
+    }}
+    QLabel[aiFamilyLabel="true"][aiFamilyTone="blue"] {{ color:{p["blue_text"]}; }}
+    QLabel[aiFamilyLabel="true"][aiFamilyTone="amber"] {{ color:{p["amber_text"]}; }}
+    QLabel[aiFamilyLabel="true"][aiFamilyTone="violet"] {{ color:{p["violet_text"]}; }}
+    QLabel[aiFamilyLabel="true"][aiFamilyTone="green"] {{ color:{p["green_text"]}; }}
+
+    QPushButton[aiToolButton="true"] {{
+        background:{p["surface_alt"]};
+        color:{p["text_soft"]};
+        border:1px solid {p["border"]};
+        border-radius:8px;
+        padding:0 10px;
+        text-align:left;
+        font-size:9px;
+        font-weight:800;
+    }}
+    QPushButton[aiToolButton="true"]:hover {{
+        background:{p["primary_soft"]};
+        color:{p["primary_text"]};
+        border-color:{p["border_strong"]};
+    }}
+
+    QLabel#AiOutputOrb {{
+        background:{p["hero_2"]};
+        color:#FFFFFF;
+        border:none;
+        border-radius:9px;
+        font-size:13px;
+        font-weight:900;
+    }}
+    QLabel#AiOutputTitle {{
+        color:{p["text"]};
+        background:transparent;
+        border:none;
+        font-size:10px;
+        font-weight:900;
+        letter-spacing:.6px;
+    }}
+
+    QPushButton[aiSecondaryButton="true"] {{
+        background:{p["surface_alt"]};
+        color:{p["text_soft"]};
+        border:1px solid {p["border"]};
+        border-radius:8px;
+        padding:0 11px;
+        font-size:9px;
+        font-weight:850;
+    }}
+    QPushButton[aiSecondaryButton="true"]:hover {{
+        background:{p["primary_soft"]};
+        color:{p["primary_text"]};
+        border-color:{p["border_strong"]};
+    }}
+
+    QTextEdit#AiOutput {{
+        background:{p["surface_alt"]};
+        color:{p["text_soft"]};
+        border:1px solid {p["border"]};
+        border-radius:11px;
+        padding:13px;
+        font-size:11px;
+        selection-background-color:#338CE4;
+        selection-color:#FFFFFF;
+    }}
+
+    QListWidget#AiInsightsList,
+    QListWidget#AiHistoryList {{
+        background:{p["surface_alt"]};
+        color:{p["text_soft"]};
+        border:1px solid {p["border"]};
+        border-radius:11px;
+        padding:5px;
+        outline:none;
+        font-size:9px;
+    }}
+    QListWidget#AiInsightsList::item,
+    QListWidget#AiHistoryList::item {{
+        background:{p["surface"]};
+        color:{p["text_soft"]};
+        margin:3px 2px;
+        padding:9px 9px;
+        border:1px solid {p["border"]};
+        border-radius:8px;
+    }}
+    QListWidget#AiInsightsList::item:hover,
+    QListWidget#AiHistoryList::item:hover {{
+        background:{p["surface_soft"]};
+        color:{p["text"]};
+        border-color:{p["border_strong"]};
+    }}
+    QListWidget#AiInsightsList::item:selected,
+    QListWidget#AiHistoryList::item:selected {{
+        background:{p["selection"]};
+        color:{p["selection_text"]};
+        border-color:#338CE4;
+    }}
+
+    QSplitter#AiCommandSplitter::handle,
+    QSplitter#AiFeedSplitter::handle {{
+        background:transparent;
+    }}
+    """
+
+
 class AIPremiumCard(QFrame):
     """Section card shared by Classic, UI Light and UI Dark."""
 

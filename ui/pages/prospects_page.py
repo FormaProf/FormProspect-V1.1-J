@@ -168,7 +168,7 @@ class ProspectsPage(QWidget):
         hero_texts.addWidget(titre)
         hero_texts.addWidget(self.label_info)
 
-        self.hero_mode_chip = QLabel("●  AI CRM  •  LIVE")
+        self.hero_mode_chip = QLabel("●  CRM  •  LIVE")
         self.hero_mode_chip.setAlignment(Qt.AlignCenter)
         self.hero_mode_chip.setFixedHeight(30)
         self.hero_mode_chip.setMinimumWidth(112)
@@ -801,6 +801,11 @@ class ProspectsPage(QWidget):
             ).strip()
             or None
         )
+
+    def set_crm_universe(self, universe_name: str | None) -> None:
+        normalized = " ".join(str(universe_name or "").split()).strip()
+        prefix = f"{normalized.upper()} CRM" if normalized else "CRM"
+        self.hero_mode_chip.setText(f"●  {prefix}  •  LIVE")
 
     def _database_path(self):
         context = self._data_context()

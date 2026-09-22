@@ -503,6 +503,25 @@ class CommercialProjectsPage(QWidget):
         self.choice_scroll.setMinimumHeight(height)
         self.choice_scroll.setMaximumHeight(height)
 
+    def cache_universe_context(self, parents) -> None:
+        mapping = {}
+        for parent in tuple(parents or ()):
+            universe_name = str(getattr(parent, "name", "") or "").strip()
+            if not universe_name:
+                continue
+            for project in tuple(getattr(parent, "projects", ()) or ()):
+                project_id = str(getattr(project, "id", "") or "").strip()
+                if project_id:
+                    mapping[project_id] = universe_name
+        self._project_universe_names = mapping
+
+    def universe_name_for_project(self, project_id: str) -> str:
+        project_id = str(project_id or "").strip()
+        return str(
+            getattr(self, "_project_universe_names", {}).get(project_id, "")
+            or ""
+        ).strip()
+
     def rafraichir(self):
         if not self._classic_mode:
             self._apply_visual_theme()
@@ -523,6 +542,7 @@ class CommercialProjectsPage(QWidget):
             parents = self.service.list_for_commercial(self.user_id)
 
         parents = tuple(parents or ())
+        self.cache_universe_context(parents)
         self._update_metrics(parents)
         self.empty_label.hide()
 

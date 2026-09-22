@@ -11,358 +11,318 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from core.premium_theme import (
-    BORDER,
-    CARD,
-    MUTED,
-    NAVY,
-    PAGE_BG,
-    PRIMARY_BUTTON,
-    SECONDARY_BUTTON,
-    TEXT,
-)
 from core.session import SessionState
 from services.cloud_api_client import CloudAPIError
 from services.cloud_runtime import CloudRuntime
+from ui.trainer_availability_premium_theme import (
+    trainer_availability_palette,
+    trainer_availability_stylesheet,
+    trainer_platform_badge_style,
+    trainer_row_button_style,
+    trainer_status_badge_style,
+)
 
 
 class TrainerAvailabilityPage(QWidget):
-    """Accès administrateur aux agendas de disponibilité des formateurs."""
+    """Pilotage des agendas de disponibilité des formateurs."""
 
     def __init__(self):
         super().__init__()
         self.rows: list[dict] = []
-        self.setStyleSheet(f"background:{PAGE_BG};")
         self._build_ui()
+        self._apply_visual_theme()
 
     def _build_ui(self) -> None:
+        self.setObjectName("TrainerAvailabilityPage")
+
         page = QVBoxLayout(self)
         page.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(
-            "QScrollArea{background:#F4F7FB;border:none;}"
-            "QScrollBar:vertical{background:transparent;width:10px;margin:4px 2px;}"
-            "QScrollBar::handle:vertical{background:#CBD5E1;min-height:40px;border-radius:5px;}"
-            "QScrollBar::handle:vertical:hover{background:#94A3B8;}"
-            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
-        )
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("TrainerAvailabilityScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        content = QWidget()
-        content.setStyleSheet("background:#F4F7FB;")
-        root = QVBoxLayout(content)
-        root.setContentsMargins(28, 24, 28, 34)
-        root.setSpacing(16)
+        self.content = QWidget()
+        self.content.setObjectName("TrainerAvailabilityContent")
+        root = QVBoxLayout(self.content)
+        root.setContentsMargins(26, 22, 26, 30)
+        root.setSpacing(12)
 
-        # ==============================================================
-        # HERO
-        # ==============================================================
+        # Header
         hero = QFrame()
-        hero.setObjectName("TrainerHero")
-        hero.setMinimumHeight(128)
-        hero.setStyleSheet(
-            "QFrame#TrainerHero{"
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #FFFFFF, stop:1 #EEF6FF);"
-            "border:1px solid #DCE7F3;border-radius:22px;"
-            "}"
-            "QLabel{background:transparent;border:none;}"
-        )
-
+        hero.setObjectName("TrainerAvailabilityHero")
+        hero.setMinimumHeight(112)
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(22, 18, 20, 18)
-        hero_layout.setSpacing(16)
-
-        icon = QLabel("▦")
-        icon.setFixedSize(58, 58)
-        icon.setAlignment(Qt.AlignCenter)
-        icon.setStyleSheet(
-            "background:#0B2A52;color:#FFFFFF;border-radius:18px;"
-            "font-size:25px;font-weight:900;"
-        )
+        hero_layout.setContentsMargins(20, 16, 18, 16)
+        hero_layout.setSpacing(14)
 
         titles = QVBoxLayout()
         titles.setSpacing(3)
 
-        overline = QLabel("FORMATEURS  •  PLANIFICATION DES DISPONIBILITÉS")
-        overline.setStyleSheet(
-            "color:#338CE4;font-size:9px;font-weight:900;letter-spacing:1.1px;"
-        )
+        overline = QLabel("RESSOURCES PÉDAGOGIQUES  •  PLANIFICATION")
+        overline.setObjectName("TrainerAvailabilityOverline")
 
         title = QLabel("Disponibilités formateurs")
-        title.setStyleSheet(
-            "color:#0B1220;font-size:28px;font-weight:900;"
-        )
+        title.setObjectName("TrainerAvailabilityTitle")
 
         subtitle = QLabel(
-            "Consultez les agendas de vos formateurs avant de programmer "
+            "Vérifiez en un coup d'œil les agendas disponibles avant de planifier "
             "une nouvelle session."
         )
+        subtitle.setObjectName("TrainerAvailabilitySubtitle")
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(
-            "color:#718096;font-size:11px;"
-        )
 
         titles.addWidget(overline)
         titles.addWidget(title)
         titles.addWidget(subtitle)
+        hero_layout.addLayout(titles, 1)
+
+        hero_actions = QVBoxLayout()
+        hero_actions.setSpacing(8)
+
+        self.cloud_chip = QLabel("●  CLOUD FORMATEURS")
+        self.cloud_chip.setObjectName("TrainerAvailabilityCloud")
+        self.cloud_chip.setAlignment(Qt.AlignCenter)
+        self.cloud_chip.setFixedHeight(28)
+        self.cloud_chip.setMinimumWidth(142)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
 
         self.edit_link_button = QPushButton("✎  Modifier le lien")
+        self.edit_link_button.setObjectName("TrainerSecondaryButton")
         self.edit_link_button.setCursor(Qt.PointingHandCursor)
-        self.edit_link_button.setMinimumSize(145, 40)
-        self.edit_link_button.setStyleSheet(
-            "QPushButton{background:#FFFFFF;color:#334155;"
-            "border:1px solid #D3DFEB;border-radius:10px;"
-            "padding:0 15px;font-size:10px;font-weight:850;}"
-            "QPushButton:hover{background:#F4F9FF;color:#247BD0;"
-            "border-color:#92BDEA;}"
-            "QPushButton:disabled{background:#F1F5F9;color:#A0AEC0;}"
-        )
         self.edit_link_button.clicked.connect(self._edit_link)
 
-        refresh = QPushButton("↻  Actualiser")
-        refresh.setCursor(Qt.PointingHandCursor)
-        refresh.setMinimumSize(118, 40)
-        refresh.setStyleSheet(
-            "QPushButton{background:#338CE4;color:#FFFFFF;border:none;"
-            "border-radius:10px;padding:0 16px;font-size:10px;font-weight:900;}"
-            "QPushButton:hover{background:#287FD4;}"
-            "QPushButton:pressed{background:#1E6DBA;}"
-        )
-        refresh.clicked.connect(self.rafraichir)
+        self.refresh_button = QPushButton("↻  Actualiser")
+        self.refresh_button.setObjectName("TrainerPrimaryButton")
+        self.refresh_button.setCursor(Qt.PointingHandCursor)
+        self.refresh_button.clicked.connect(self.rafraichir)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        actions.addWidget(self.edit_link_button)
-        actions.addWidget(refresh)
-
-        hero_layout.addWidget(icon)
-        hero_layout.addLayout(titles, 1)
-        hero_layout.addLayout(actions)
+        buttons.addWidget(self.edit_link_button)
+        buttons.addWidget(self.refresh_button)
+        hero_actions.addWidget(self.cloud_chip, 0, Qt.AlignRight)
+        hero_actions.addLayout(buttons)
+        hero_layout.addLayout(hero_actions)
 
         root.addWidget(hero)
 
-        # ==============================================================
         # KPI
-        # ==============================================================
         kpi_row = QHBoxLayout()
-        kpi_row.setSpacing(12)
-        self.kpi_values = {}
+        kpi_row.setSpacing(9)
+        self.kpi_values: dict[str, QLabel] = {}
 
-        kpis = [
-            ("trainers", "Formateurs", "0", "Profils visibles", "#338CE4", "#EEF6FF", "👤"),
-            ("active", "Actifs", "0", "Formateurs disponibles", "#10B981", "#ECFDF5", "●"),
-            ("linked", "Agendas renseignés", "0", "Liens configurés", "#8B5CF6", "#F5F3FF", "▦"),
-        ]
-
-        for key, label, value, caption, accent, soft, glyph in kpis:
+        for key, label, caption in (
+            ("trainers", "Formateurs", "Profils visibles"),
+            ("active", "Actifs", "Disponibles dans l'équipe"),
+            ("linked", "Agendas connectés", "Liens configurés"),
+            ("missing", "À configurer", "Agendas encore manquants"),
+        ):
             card = QFrame()
-            card.setObjectName(f"TrainerMetric_{key}")
-            card.setMinimumHeight(100)
-            card.setStyleSheet(
-                f"QFrame#TrainerMetric_{key}{{background:#FFFFFF;"
-                "border:1px solid #E2EAF3;border-radius:16px;}"
-                "QLabel{background:transparent;border:none;}"
-            )
+            card.setProperty("trainerCard", True)
             layout = QVBoxLayout(card)
-            layout.setContentsMargins(14, 12, 14, 11)
-            layout.setSpacing(4)
+            layout.setContentsMargins(13, 10, 13, 10)
+            layout.setSpacing(2)
 
-            top = QHBoxLayout()
-            badge = QLabel(glyph)
-            badge.setFixedSize(28, 28)
-            badge.setAlignment(Qt.AlignCenter)
-            badge.setStyleSheet(
-                f"background:{soft};color:{accent};border-radius:9px;"
-                "font-size:12px;font-weight:900;"
-            )
             label_widget = QLabel(label)
-            label_widget.setStyleSheet(
-                "color:#53657C;font-size:9px;font-weight:850;"
-            )
-            top.addWidget(badge)
-            top.addWidget(label_widget)
-            top.addStretch()
+            label_widget.setProperty("trainerLabel", True)
 
-            value_widget = QLabel(value)
-            value_widget.setStyleSheet(
-                "color:#071A31;font-size:24px;font-weight:900;"
-            )
+            value_widget = QLabel("0")
+            value_widget.setProperty("trainerValue", True)
+
             caption_widget = QLabel(caption)
-            caption_widget.setStyleSheet(
-                "color:#94A3B8;font-size:8px;"
-            )
+            caption_widget.setProperty("trainerCaption", True)
 
-            layout.addLayout(top)
+            layout.addWidget(label_widget)
             layout.addWidget(value_widget)
             layout.addWidget(caption_widget)
-
             self.kpi_values[key] = value_widget
-            kpi_row.addWidget(card)
+            kpi_row.addWidget(card, 1)
 
         root.addLayout(kpi_row)
 
-        # ==============================================================
-        # INFO BAND
-        # ==============================================================
-        info = QFrame()
-        info.setObjectName("TrainerInfo")
-        info.setStyleSheet(
-            "QFrame#TrainerInfo{background:#F8FBFF;"
-            "border:1px solid #DCE8F5;border-radius:14px;}"
-            "QLabel{background:transparent;border:none;}"
-        )
-        info_layout = QHBoxLayout(info)
-        info_layout.setContentsMargins(14, 11, 14, 11)
-        info_layout.setSpacing(10)
+        # Two-column command center
+        main_row = QHBoxLayout()
+        main_row.setSpacing(10)
 
-        info_icon = QLabel("i")
-        info_icon.setFixedSize(28, 28)
-        info_icon.setAlignment(Qt.AlignCenter)
-        info_icon.setStyleSheet(
-            "background:#338CE4;color:#FFFFFF;border-radius:9px;"
-            "font-size:12px;font-weight:900;"
+        coverage = QFrame()
+        coverage.setProperty("trainerCard", True)
+        coverage.setMinimumWidth(265)
+        coverage.setMaximumWidth(335)
+        coverage_layout = QVBoxLayout(coverage)
+        coverage_layout.setContentsMargins(15, 14, 15, 15)
+        coverage_layout.setSpacing(9)
+
+        over = QLabel("COUVERTURE DES AGENDAS")
+        over.setProperty("trainerSectionOverline", True)
+        coverage_title = QLabel("Prêt à planifier")
+        coverage_title.setProperty("trainerSectionTitle", True)
+
+        coverage_note = QLabel(
+            "Un agenda connecté permet d'ouvrir immédiatement les disponibilités "
+            "du formateur depuis Form@Prospect."
         )
+        coverage_note.setProperty("trainerBody", True)
+        coverage_note.setWordWrap(True)
+
+        self.coverage_value = QLabel("0 / 0")
+        self.coverage_value.setProperty("trainerValue", True)
+
+        self.coverage_caption = QLabel("Aucun agenda chargé")
+        self.coverage_caption.setProperty("trainerCaption", True)
+
+        self.coverage_bar = QProgressBar()
+        self.coverage_bar.setObjectName("TrainerCoverageBar")
+        self.coverage_bar.setRange(0, 100)
+        self.coverage_bar.setValue(0)
+        self.coverage_bar.setTextVisible(False)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+
+        info = QLabel(
+            "Google Sheets, Google Calendar, Microsoft 365 ou toute plateforme "
+            "de planning accessible par lien."
+        )
+        info.setProperty("trainerBody", True)
+        info.setWordWrap(True)
+
+        self.open_selected_button = QPushButton("↗  Ouvrir le planning sélectionné")
+        self.open_selected_button.setObjectName("TrainerPrimaryButton")
+        self.open_selected_button.setEnabled(False)
+        self.open_selected_button.clicked.connect(self._open_selected)
 
         self.summary = QLabel("0 formateur")
-        self.summary.setStyleSheet(
-            "color:#0B2A52;font-size:10px;font-weight:900;"
-        )
+        self.summary.setProperty("trainerBody", True)
+        self.summary.setWordWrap(True)
 
-        note = QLabel(
-            "Les liens peuvent pointer vers Google Sheets, Google Calendar, "
-            "Microsoft 365 ou toute autre plateforme de disponibilités accessible en ligne."
-        )
-        note.setWordWrap(True)
-        note.setStyleSheet(
-            "color:#6B7C90;font-size:9px;"
-        )
+        coverage_layout.addWidget(over)
+        coverage_layout.addWidget(coverage_title)
+        coverage_layout.addWidget(coverage_note)
+        coverage_layout.addSpacing(4)
+        coverage_layout.addWidget(self.coverage_value)
+        coverage_layout.addWidget(self.coverage_caption)
+        coverage_layout.addWidget(self.coverage_bar)
+        coverage_layout.addWidget(divider)
+        coverage_layout.addWidget(info)
+        coverage_layout.addStretch(1)
+        coverage_layout.addWidget(self.open_selected_button)
+        coverage_layout.addWidget(self.summary)
 
-        info_layout.addWidget(info_icon)
-        info_layout.addWidget(self.summary)
-        info_layout.addSpacing(8)
-        info_layout.addWidget(note, 1)
-
-        root.addWidget(info)
-
-        # ==============================================================
-        # DIRECTORY CARD
-        # ==============================================================
         directory = QFrame()
-        directory.setObjectName("TrainerDirectory")
-        directory.setStyleSheet(
-            "QFrame#TrainerDirectory{background:#FFFFFF;"
-            "border:1px solid #E2EAF3;border-radius:18px;}"
-            "QLabel{background:transparent;border:none;}"
-        )
+        directory.setProperty("trainerCard", True)
         directory_layout = QVBoxLayout(directory)
-        directory_layout.setContentsMargins(18, 16, 18, 18)
-        directory_layout.setSpacing(12)
+        directory_layout.setContentsMargins(15, 13, 15, 14)
+        directory_layout.setSpacing(9)
 
         directory_top = QHBoxLayout()
         directory_titles = QVBoxLayout()
-        directory_titles.setSpacing(2)
+        directory_titles.setSpacing(1)
 
-        over = QLabel("ÉQUIPE PÉDAGOGIQUE")
-        over.setStyleSheet(
-            "color:#338CE4;font-size:9px;font-weight:900;letter-spacing:1px;"
+        directory_over = QLabel("ÉQUIPE PÉDAGOGIQUE")
+        directory_over.setProperty("trainerSectionOverline", True)
+        directory_title = QLabel("Répertoire des formateurs")
+        directory_title.setProperty("trainerSectionTitle", True)
+        directory_subtitle = QLabel(
+            "Spécialités, statut et accès direct aux disponibilités."
         )
-        directory_title = QLabel("Agendas & disponibilités")
-        directory_title.setStyleSheet(
-            "color:#0B1220;font-size:18px;font-weight:900;"
-        )
-        directory_sub = QLabel(
-            "Retrouvez les spécialités, le statut et le planning de chaque formateur."
-        )
-        directory_sub.setStyleSheet(
-            "color:#7A8A9E;font-size:10px;"
-        )
+        directory_subtitle.setProperty("trainerBody", True)
 
-        directory_titles.addWidget(over)
+        directory_titles.addWidget(directory_over)
         directory_titles.addWidget(directory_title)
-        directory_titles.addWidget(directory_sub)
+        directory_titles.addWidget(directory_subtitle)
 
         self.count_badge = QLabel("0 formateur")
         self.count_badge.setAlignment(Qt.AlignCenter)
-        self.count_badge.setMinimumSize(94, 28)
-        self.count_badge.setStyleSheet(
-            "background:#EEF6FF;color:#1473C9;border:1px solid #CFE4F8;"
-            "border-radius:9px;padding:0 9px;font-size:9px;font-weight:900;"
-        )
+        self.count_badge.setProperty("trainerLabel", True)
 
         directory_top.addLayout(directory_titles, 1)
         directory_top.addWidget(self.count_badge, 0, Qt.AlignTop)
         directory_layout.addLayout(directory_top)
 
         self.table = QTableWidget(0, 5)
+        self.table.setObjectName("TrainerAvailabilityTable")
         self.table.setHorizontalHeaderLabels(
-            [
-                "Formateur",
-                "Spécialités",
-                "Statut",
-                "Plateforme",
-                "Planning",
-            ]
+            ["Formateur", "Spécialités", "Statut", "Plateforme", "Planning"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(False)
+        self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setWordWrap(True)
-        self.table.setMinimumHeight(340)
+        self.table.setMinimumHeight(390)
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.Fixed)
-        self.table.setColumnWidth(2, 105)
+        self.table.setColumnWidth(2, 104)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.Fixed)
-        self.table.setColumnWidth(4, 185)
+        self.table.setColumnWidth(4, 175)
 
-        self.table.setStyleSheet(
-            "QTableWidget{background:#FFFFFF;color:#172033;"
-            "border:1px solid #E4EBF4;border-radius:13px;"
-            "selection-background-color:#EAF4FF;selection-color:#0B2A52;"
-            "outline:none;font-size:10px;}"
-            "QHeaderView::section{background:#0B2A52;color:#FFFFFF;"
-            "border:none;border-right:1px solid #1A416C;"
-            "padding:11px 8px;font-size:9px;font-weight:900;}"
-            "QTableWidget::item{background:#FFFFFF;border:none;"
-            "border-bottom:1px solid #EEF2F7;padding:11px 9px;}"
-            "QTableWidget::item:selected{background:#EAF4FF;color:#0B2A52;"
-            "border-left:3px solid #338CE4;}"
-        )
         self.table.doubleClicked.connect(self._open_selected)
+        self.table.itemSelectionChanged.connect(self._sync_selection_actions)
         directory_layout.addWidget(self.table, 1)
 
         self.status_label = QLabel("")
+        self.status_label.setObjectName("TrainerAvailabilityStatus")
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet(
-            "background:#F8FBFE;color:#718096;border:1px solid #E8EEF5;"
-            "border-radius:10px;padding:9px 11px;font-size:9px;"
-        )
         directory_layout.addWidget(self.status_label)
 
-        root.addWidget(directory, 1)
+        main_row.addWidget(coverage)
+        main_row.addWidget(directory, 1)
+        root.addLayout(main_row, 1)
 
-        scroll.setWidget(content)
-        page.addWidget(scroll)
+        self.scroll.setWidget(self.content)
+        page.addWidget(self.scroll)
+
+    def _apply_visual_theme(self) -> None:
+        palette = trainer_availability_palette()
+        self._palette = palette
+        self.setStyleSheet(trainer_availability_stylesheet(palette))
+        self._restyle_rows()
+
+    def _restyle_rows(self) -> None:
+        if not hasattr(self, "table"):
+            return
+        p = getattr(self, "_palette", trainer_availability_palette())
+
+        for row_index, trainer in enumerate(self.rows):
+            active = bool(trainer.get("active"))
+            url = str(trainer.get("availability_url") or "").strip()
+
+            status_badge = self.table.cellWidget(row_index, 2)
+            if status_badge is not None:
+                status_badge.setStyleSheet(
+                    trainer_status_badge_style(p, active)
+                )
+
+            platform_badge = self.table.cellWidget(row_index, 3)
+            if platform_badge is not None:
+                platform_badge.setStyleSheet(
+                    trainer_platform_badge_style(p, bool(url))
+                )
+
+            open_button = self.table.cellWidget(row_index, 4)
+            if open_button is not None:
+                open_button.setStyleSheet(
+                    trainer_row_button_style(p, bool(url))
+                )
 
     @staticmethod
     def _is_admin() -> bool:
@@ -395,20 +355,33 @@ class TrainerAvailabilityPage(QWidget):
         platform = TrainerAvailabilityPage._platform_name(url)
         return f"{platform} — {parsed.netloc}"
 
+    def _reset_metrics(self) -> None:
+        for key in ("trainers", "active", "linked", "missing"):
+            self.kpi_values[key].setText("0")
+        self.coverage_value.setText("0 / 0")
+        self.coverage_caption.setText("Aucun agenda chargé")
+        self.coverage_bar.setValue(0)
+        self.count_badge.setText("0 formateur")
+        self.summary.setText("0 formateur")
+        self.open_selected_button.setEnabled(False)
+
+    def _sync_selection_actions(self) -> None:
+        row = self.table.currentRow()
+        enabled = False
+        if 0 <= row < len(self.rows):
+            enabled = bool(
+                str(self.rows[row].get("availability_url") or "").strip()
+            )
+        self.open_selected_button.setEnabled(enabled)
+
     def rafraichir(self) -> None:
         if not self._can_view():
             self.rows = []
             self.table.setRowCount(0)
+            self._reset_metrics()
             self.status_label.setText(
                 "Cette section est accessible aux administrateurs et aux commerciaux."
             )
-            if hasattr(self, "kpi_values"):
-                self.kpi_values["trainers"].setText("0")
-                self.kpi_values["active"].setText("0")
-                self.kpi_values["linked"].setText("0")
-            if hasattr(self, "count_badge"):
-                self.count_badge.setText("0 formateur")
-
             self.edit_link_button.setVisible(False)
             return
 
@@ -419,18 +392,15 @@ class TrainerAvailabilityPage(QWidget):
         if not CloudRuntime.is_active():
             self.rows = []
             self.table.setRowCount(0)
+            self._reset_metrics()
+            self.cloud_chip.setText("●  CLOUD INDISPONIBLE")
             self.status_label.setText(
                 "Connectez-vous à Form@Prospect Cloud pour consulter "
                 "les disponibilités des formateurs."
             )
-            if hasattr(self, "kpi_values"):
-                self.kpi_values["trainers"].setText("0")
-                self.kpi_values["active"].setText("0")
-                self.kpi_values["linked"].setText("0")
-            if hasattr(self, "count_badge"):
-                self.count_badge.setText("0 formateur")
-
             return
+
+        self.cloud_chip.setText("●  CLOUD FORMATEURS  •  LIVE")
 
         try:
             self.rows = CloudRuntime.api().list_cloud_trainers(
@@ -439,18 +409,21 @@ class TrainerAvailabilityPage(QWidget):
         except CloudAPIError as exc:
             self.rows = []
             self.table.setRowCount(0)
+            self._reset_metrics()
             self.status_label.setText(f"⛔ {exc}")
             return
 
         self.table.setRowCount(len(self.rows))
-        for row_index in range(len(self.rows)):
-            self.table.setRowHeight(row_index, 56)
         linked = 0
         active_count = 0
 
+        p = getattr(self, "_palette", trainer_availability_palette())
+
         for row_index, trainer in enumerate(self.rows):
+            self.table.setRowHeight(row_index, 54)
             url = str(trainer.get("availability_url") or "").strip()
             active = bool(trainer.get("active"))
+
             if active:
                 active_count += 1
             if url:
@@ -459,36 +432,18 @@ class TrainerAvailabilityPage(QWidget):
             values = [
                 trainer.get("full_name") or "",
                 trainer.get("specialties") or "—",
-                "Actif" if active else "Inactif",
-                self._short_url(url),
             ]
 
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
-                item.setTextAlignment(
-                    Qt.AlignVCenter
-                    | (Qt.AlignCenter if column == 2 else Qt.AlignLeft)
-                )
-                if column == 0:
-                    item.setFont(item.font())
-                if column == 3 and url:
-                    item.setToolTip(url)
+                item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
                 self.table.setItem(row_index, column, item)
 
             status_badge = QLabel("●  Actif" if active else "●  Inactif")
             status_badge.setAlignment(Qt.AlignCenter)
-            status_badge.setMinimumSize(82, 30)
+            status_badge.setMinimumSize(80, 29)
             status_badge.setStyleSheet(
-                (
-                    "background:#ECFDF5;color:#087A45;border:1px solid #A7F3D0;"
-                    "border-radius:9px;padding:0 12px;font-size:9px;font-weight:900;"
-                )
-                if active
-                else
-                (
-                    "background:#F8FAFC;color:#64748B;border:1px solid #DCE4EC;"
-                    "border-radius:9px;padding:0 12px;font-size:9px;font-weight:900;"
-                )
+                trainer_status_badge_style(p, active)
             )
             self.table.setCellWidget(row_index, 2, status_badge)
 
@@ -496,70 +451,64 @@ class TrainerAvailabilityPage(QWidget):
             platform_badge.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
             platform_badge.setToolTip(url if url else "")
             platform_badge.setStyleSheet(
-                (
-                    "background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;"
-                    "border-radius:9px;padding:6px 10px;font-size:9px;font-weight:800;"
-                )
-                if url
-                else
-                (
-                    "background:#F8FAFC;color:#94A3B8;border:1px solid #E2E8F0;"
-                    "border-radius:9px;padding:6px 10px;font-size:9px;font-weight:800;"
-                )
+                trainer_platform_badge_style(p, bool(url))
             )
             self.table.setCellWidget(row_index, 3, platform_badge)
 
             open_button = QPushButton(
-                "🌐  Consulter le planning"
+                "↗  Consulter"
                 if url
-                else "Planning non renseigné"
+                else "Non renseigné"
             )
             open_button.setCursor(Qt.PointingHandCursor)
-            open_button.setMinimumSize(170, 36)
+            open_button.setMinimumSize(145, 34)
             open_button.setEnabled(bool(url))
             open_button.setStyleSheet(
-                (
-                    "QPushButton{background:#338CE4;color:#FFFFFF;border:none;"
-                    "border-radius:9px;padding:0 16px;font-size:9px;font-weight:900;}"
-                    "QPushButton:hover{background:#287FD4;}"
-                )
-                if url
-                else
-                (
-                    "QPushButton{background:#EEF2F6;color:#94A3B8;border:none;"
-                    "border-radius:9px;padding:0 16px;font-size:9px;font-weight:850;}"
-                )
+                trainer_row_button_style(p, bool(url))
             )
             open_button.clicked.connect(
                 lambda _checked=False, target=url: self._open_url(target)
             )
             self.table.setCellWidget(row_index, 4, open_button)
 
-        self.summary.setText(
-            f"{len(self.rows)} formateur(s) • {linked} agenda(s) renseigné(s)"
+        missing = max(0, len(self.rows) - linked)
+        coverage = round((linked / len(self.rows)) * 100) if self.rows else 0
+
+        self.kpi_values["trainers"].setText(str(len(self.rows)))
+        self.kpi_values["active"].setText(str(active_count))
+        self.kpi_values["linked"].setText(str(linked))
+        self.kpi_values["missing"].setText(str(missing))
+
+        self.coverage_value.setText(f"{linked} / {len(self.rows)}")
+        self.coverage_caption.setText(
+            f"{coverage}% des agendas sont configurés"
+            if self.rows
+            else "Aucun agenda chargé"
         )
-        if hasattr(self, "count_badge"):
-            self.count_badge.setText(
-                f"{len(self.rows)} formateur" if len(self.rows) <= 1
-                else f"{len(self.rows)} formateurs"
-            )
-        if hasattr(self, "kpi_values"):
-            self.kpi_values["trainers"].setText(str(len(self.rows)))
-            self.kpi_values["active"].setText(str(active_count))
-            self.kpi_values["linked"].setText(str(linked))
+        self.coverage_bar.setValue(coverage)
+
+        self.summary.setText(
+            f"{len(self.rows)} formateur(s) • {linked} agenda(s) connecté(s)"
+        )
+        self.count_badge.setText(
+            f"{len(self.rows)} formateur"
+            if len(self.rows) <= 1
+            else f"{len(self.rows)} formateurs"
+        )
+
         if is_admin:
             self.status_label.setText(
-                "Double-cliquez sur un formateur pour ouvrir son agenda. "
-                "Sélectionnez une ligne puis « Modifier le lien agenda » "
-                "pour enregistrer ou remplacer son lien."
+                "Sélectionnez un formateur pour ouvrir son planning ou modifier "
+                "le lien de disponibilités."
             )
-            self.edit_link_button.setEnabled(True)
         else:
             self.status_label.setText(
-                "Double-cliquez sur un formateur ou utilisez « Ouvrir » "
-                "pour consulter ses disponibilités. La modification des liens "
-                "reste réservée à l'administrateur."
+                "Sélectionnez un formateur pour consulter ses disponibilités. "
+                "La modification des liens reste réservée à l'administrateur."
             )
+
+        self._sync_selection_actions()
+        self._restyle_rows()
 
     def _selected(self) -> dict | None:
         row = self.table.currentRow()
