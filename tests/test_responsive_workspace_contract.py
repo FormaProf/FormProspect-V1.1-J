@@ -82,3 +82,11 @@ def test_page_themes_are_not_rewritten_by_the_responsive_layer():
     assert 'QLabel {' not in source
     assert 'QPushButton {' not in source
     assert '.setFixedWidth(' not in source
+
+
+def test_responsive_layout_handles_pages_that_shadow_qwidget_layout():
+    source = _source(RESPONSIVE)
+    assert "def _installed_layout(page: QWidget)" in source
+    assert "QWidget.layout(page)" in source
+    assert "layout = page.layout()" not in source
+    assert source.count("layout = _installed_layout(page)") == 3

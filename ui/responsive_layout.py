@@ -23,6 +23,36 @@ LAPTOP = "laptop"
 COMPACT = "compact"
 
 
+def _installed_layout(page: QWidget) -> Optional[QLayout]:
+    """Return the installed Qt layout even if the instance shadows ``layout``.
+
+    Some legacy pages keep their QVBoxLayout in an instance attribute named
+    ``layout``. Calling the instance attribute as a method then raises a
+    ``QVBoxLayout object is not callable`` TypeError. Calling QWidget.layout
+    directly bypasses that Python attribute shadowing.
+    """
+
+    try:
+        layout = QWidget.layout(page)
+    except (RuntimeError, TypeError):
+        layout = None
+
+    if layout is not None:
+        return layout
+
+    candidate = getattr(page, "layout", None)
+    if isinstance(candidate, QLayout):
+        return candidate
+    if callable(candidate):
+        try:
+            candidate = candidate()
+        except TypeError:
+            return None
+        if isinstance(candidate, QLayout):
+            return candidate
+    return None
+
+
 @dataclass(frozen=True)
 class ResponsiveMetrics:
     mode: str
@@ -136,7 +166,7 @@ class ResponsivePageHost(QScrollArea):
 
     @staticmethod
     def _layout_minimum(page: QWidget) -> QSize:
-        layout = page.layout()
+        layout = _installed_layout(page)
         if layout is None:
             return QSize(0, 0)
         layout.activate()
@@ -271,7 +301,7 @@ class ResponsiveManager(QObject):
         key = id(page)
         if key in self._page_layout_defaults:
             return
-        layout = page.layout()
+        layout = _installed_layout(page)
         if layout is None:
             return
         margins = layout.contentsMargins()
@@ -288,7 +318,7 @@ class ResponsiveManager(QObject):
             return
 
         _page, original, original_spacing = saved
-        layout = page.layout()
+        layout = _installed_layout(page)
         if layout is None:
             return
 

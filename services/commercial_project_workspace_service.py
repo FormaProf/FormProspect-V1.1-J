@@ -34,6 +34,34 @@ class CommercialProjectWorkspaceService:
     def __init__(self, api):
         self.api = api
 
+    def _project_prospect_count(self, project: CloudProject) -> int:
+        """Return the live Cloud prospect count for one project.
+
+        ``project.prospect_count`` comes from the project listing payload and can
+        legitimately be stale after a portfolio reassignment.  The CRM itself
+        uses the prospects endpoint/stats, so the workspace counters must use
+        the same live source of truth.
+        """
+        project_id = str(getattr(project, "id", "") or "").strip()
+        if not project_id:
+            return 0
+
+        get_stats = getattr(self.api, "get_prospect_stats", None)
+        if callable(get_stats):
+            stats = get_stats(project_id=project_id)
+            try:
+                return max(0, int((stats or {}).get("total", 0) or 0))
+            except (AttributeError, TypeError, ValueError):
+                pass
+
+        # Compatibility fallback for older/fake API clients.
+        page = self.api.list_prospects(
+            project_id=project_id,
+            limit=1,
+            offset=0,
+        )
+        return max(0, int(getattr(page, "total", 0) or 0))
+
     def resolve_initial_navigation(self, parents) -> CommercialNavigationDecision:
         parents = list(parents or [])
         if not parents:
@@ -123,7 +151,7 @@ class CommercialProjectWorkspaceService:
             )
 
             prospect_count = sum(
-                project.prospect_count or 0
+                self._project_prospect_count(project)
                 for project in projects
             )
 
@@ -186,7 +214,7 @@ class CommercialProjectWorkspaceService:
             )
 
             prospect_count = sum(
-                project.prospect_count or 0
+                self._project_prospect_count(project)
                 for project in projects
             )
 

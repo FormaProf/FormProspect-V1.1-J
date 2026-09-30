@@ -7,6 +7,7 @@ class FakeAPI:
     def __init__(self):
         self.project_calls = []
         self.prospect_calls = []
+        self.stats_calls = []
 
     def list_commercial_projects(self):
         return [
@@ -24,6 +25,22 @@ class FakeAPI:
             {"id": "other-1", "name": "Autre projet", "assigned_to": "user-florian", "commercial_project_id": "parent-other", "prospect_count": 999},
         ]
         return SimpleNamespace(items=items, total=len(items), limit=100, offset=0)
+
+    def get_prospect_stats(self, *, project_id=None):
+        self.stats_calls.append({"project_id": project_id})
+        counts = {
+            "btp-1": 100,
+            "btp-landing": 20,
+            "ia-1": 50,
+            "btp-marc": 999,
+            "other-1": 999,
+        }
+        return {
+            "total": counts.get(project_id, 0),
+            "with_phone": 0,
+            "with_email": 0,
+            "with_website": 0,
+        }
 
     def list_prospects(self, **params):
         self.prospect_calls.append(params)
@@ -59,6 +76,11 @@ def test_commercial_overviews_keep_btp_and_ia_separate():
     assert by_name["IA"].lead_chaud_count == 2
     assert [project.name for project in by_name["IA"].projects] == ["IA HDF - Florian"]
     assert api.project_calls[0]["assigned_to"] == "user-florian"
+    assert api.stats_calls == [
+        {"project_id": "btp-1"},
+        {"project_id": "btp-landing"},
+        {"project_id": "ia-1"},
+    ]
     assert [
         (
             call["project_id"],
@@ -72,6 +94,35 @@ def test_commercial_overviews_keep_btp_and_ia_separate():
         ("btp-landing", "lead_chaud", 1, 0),
         ("ia-1", "lead_chaud", 1, 0),
     ]
+
+
+
+def test_commercial_overview_uses_live_stats_when_project_payload_count_is_stale():
+    api = FakeAPI()
+
+    def fake_list_projects(**params):
+        api.project_calls.append(params)
+        items = [
+            {
+                "id": "btp-marc",
+                "name": "PROJET 1 - BFC",
+                "assigned_to": "user-florian",
+                "commercial_project_id": "parent-btp",
+                "prospect_count": 0,
+            },
+        ]
+        return SimpleNamespace(items=items, total=1, limit=100, offset=0)
+
+    api.list_commercial_projects = lambda: [{"id": "parent-btp", "name": "BTP"}]
+    api.list_projects = fake_list_projects
+
+    service = CommercialProjectWorkspaceService(api)
+    overviews = service.list_for_commercial("user-florian")
+
+    assert len(overviews) == 1
+    assert overviews[0].prospect_count == 999
+    assert api.stats_calls == [{"project_id": "btp-marc"}]
+
 
 
 def test_assigned_parent_with_no_own_children_stays_empty():
@@ -173,6 +224,12 @@ def test_manager_overviews_trust_backend_visible_projects_without_local_assignme
     assert by_name["IA"].lead_chaud_count == 2
 
     assert "assigned_to" not in api.project_calls[0]
+    assert api.stats_calls == [
+        {"project_id": "btp-1"},
+        {"project_id": "btp-landing"},
+        {"project_id": "btp-marc"},
+        {"project_id": "ia-1"},
+    ]
     assert [
         call["project_id"]
         for call in api.prospect_calls
