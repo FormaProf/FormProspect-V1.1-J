@@ -1,8 +1,2 @@
-Nouvelle interface premium harmonisée sur les principaux espaces Form@Prospect
-Nouveau mode responsive pour améliorer l utilisation sur les PC portables et petits écrans
-Refonte premium du Dashboard, Agenda, Ventes et commissions, Documents et Devis et factures
-Refonte de l Assistant IA, de l Historique et de Mon compte
-Amélioration de la navigation CRM et affichage dynamique de l univers commercial actif
-Amélioration des performances de l Agenda et limitation des rechargements Cloud inutiles
-Harmonisation complète des thèmes Classique, UI Clair et UI Sombre
-Améliorations générales de lisibilité, ergonomie et stabilité
+Correction du compteur de prospects dans Mes projets commerciaux
+Correction de la compatibilité responsive de certaines pages
