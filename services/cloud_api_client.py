@@ -1713,6 +1713,30 @@ class CloudAPIClient:
             )
         return result
 
+    def mark_cloud_sale_head_sales_commission_paid(
+        self,
+        sale_id: str,
+        *,
+        reference: str = "",
+        paid_at: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "reference": str(reference or "").strip(),
+        }
+        if paid_at:
+            payload["paid_at"] = paid_at
+
+        result = self.patch_json(
+            f"/sales/{sale_id}/head-sales-commission-payment",
+            payload,
+        )
+        if not isinstance(result, dict):
+            raise CloudAPIError(
+                "Form@Prospect Cloud a retourné un règlement "
+                "Head of Sales invalide."
+            )
+        return result
+
     def cancel_cloud_sale(
         self,
         sale_id: str,

@@ -362,6 +362,17 @@ class CommissionsPage(QWidget):
         self.commission_col = self.table_headers.index("Commission")
         self.payment_col = self.table_headers.index("Paiement")
 
+        if SessionState.has_role("Manager"):
+            self.table.horizontalHeaderItem(self.amount_col).setText(
+                "Commission équipe"
+            )
+            self.table.horizontalHeaderItem(self.rate_col).setText(
+                "Taux Head of Sales"
+            )
+            self.table.horizontalHeaderItem(self.commission_col).setText(
+                "Ma commission"
+            )
+
         self.table.horizontalHeader().setSectionResizeMode(
             self.rate_col, QHeaderView.Fixed
         )
@@ -433,6 +444,17 @@ class CommissionsPage(QWidget):
         self.commission_paid_button.setFixedHeight(36)
         self.commission_paid_button.clicked.connect(self._mark_commission_paid)
 
+        self.head_sales_commission_paid_button = QPushButton(
+            "Commission Head of Sales versée"
+        )
+        self.head_sales_commission_paid_button.setObjectName(
+            "SalesSecondaryButton"
+        )
+        self.head_sales_commission_paid_button.setFixedHeight(36)
+        self.head_sales_commission_paid_button.clicked.connect(
+            self._mark_head_sales_commission_paid
+        )
+
         self.cancel_button = QPushButton("Annuler la vente")
         self.cancel_button.setObjectName("SalesDangerButton")
         self.cancel_button.setFixedHeight(36)
@@ -441,10 +463,12 @@ class CommissionsPage(QWidget):
         is_admin = self._is_admin()
         self.client_paid_button.setVisible(is_admin)
         self.commission_paid_button.setVisible(is_admin)
+        self.head_sales_commission_paid_button.setVisible(is_admin)
         self.cancel_button.setVisible(is_admin)
 
         action_bar.addWidget(self.client_paid_button)
         action_bar.addWidget(self.commission_paid_button)
+        action_bar.addWidget(self.head_sales_commission_paid_button)
         action_bar.addWidget(self.cancel_button)
 
         root.addWidget(footer_card)
@@ -703,7 +727,8 @@ class CommissionsPage(QWidget):
             )
         elif user and user.role == "Manager":
             self.subtitle.setText(
-                f"Vue de votre équipe — {MONTHS[month - 1]} {year}"
+                f"Vue de votre équipe — commissions Head of Sales — "
+                f"{MONTHS[month - 1]} {year}"
             )
         elif user and user.role == "Dirigeant hors France":
             self.subtitle.setText(
@@ -747,9 +772,16 @@ class CommissionsPage(QWidget):
             if self.show_commercial_column:
                 values.append(sale.get("commercial_name") or "")
 
+            user_is_manager = bool(user and user.role == "Manager")
+            base_amount_cents = (
+                int(sale.get("commercial_commission_cents") or 0)
+                if user_is_manager
+                else int(sale.get("price_cents") or 0)
+            )
+
             values.extend(
                 [
-                    self._format_euro(int(sale.get("price_cents") or 0)),
+                    self._format_euro(base_amount_cents),
                     self._format_rate(sale.get("commission_rate")),
                     self._format_euro(int(sale.get("commission_cents") or 0)),
                     self._payment_display(sale)[0],
@@ -832,12 +864,16 @@ class CommissionsPage(QWidget):
         if not sale or not is_admin:
             self.client_paid_button.setEnabled(False)
             self.commission_paid_button.setEnabled(False)
+            self.head_sales_commission_paid_button.setEnabled(False)
             self.cancel_button.setEnabled(False)
             return
 
         active = sale.get("status") == "signed"
         payment_status = sale.get("payment_status")
         commission_status = sale.get("commission_status")
+        head_sales_commission_status = sale.get(
+            "head_sales_commission_status"
+        )
         self.client_paid_button.setEnabled(active and payment_status == "pending")
         is_partner_beneficiary = (
             str(sale.get("commission_beneficiary_type") or "") == "commercial_partner"
@@ -850,8 +886,17 @@ class CommissionsPage(QWidget):
             and not is_partner_beneficiary
             and commission_status in {"due", "invoiced"}
         )
+        self.head_sales_commission_paid_button.setEnabled(
+            active
+            and payment_status == "paid"
+            and int(sale.get("head_sales_commission_cents") or 0) > 0
+            and head_sales_commission_status == "due"
+        )
         self.cancel_button.setEnabled(
-            active and payment_status != "paid" and commission_status != "paid"
+            active
+            and payment_status != "paid"
+            and commission_status != "paid"
+            and head_sales_commission_status != "paid"
         )
 
     def _new_sale(self) -> None:
@@ -932,6 +977,49 @@ class CommissionsPage(QWidget):
         except CloudAPIError as exc:
             QMessageBox.critical(self, "Validation impossible", str(exc))
             return
+        self.rafraichir()
+
+    def _mark_head_sales_commission_paid(self) -> None:
+        sale = self._selected()
+        if not sale:
+            return
+
+        manager_name = str(sale.get("head_sales_name") or "Head of Sales")
+        amount = int(sale.get("head_sales_commission_cents") or 0)
+
+        reference, accepted = QInputDialog.getText(
+            self,
+            "Commission Head of Sales versée",
+            "Référence du virement ou du règlement (facultatif) :",
+        )
+        if not accepted:
+            return
+
+        if QMessageBox.question(
+            self,
+            "Confirmer le versement",
+            (
+                f"Confirmez-vous le versement de "
+                f"{self._format_euro(amount)} à {manager_name} ?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        ) != QMessageBox.Yes:
+            return
+
+        try:
+            CloudRuntime.api().mark_cloud_sale_head_sales_commission_paid(
+                str(sale.get("id") or ""),
+                reference=reference,
+            )
+        except CloudAPIError as exc:
+            QMessageBox.critical(
+                self,
+                "Validation impossible",
+                str(exc),
+            )
+            return
+
         self.rafraichir()
 
     def _generate_invoice(self) -> None:

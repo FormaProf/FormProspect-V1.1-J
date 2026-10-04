@@ -103,6 +103,9 @@ class CloudAuthService:
                     'presence_status': str(item.get('presence_status') or 'offline'),
                     'commercial_partner_id': str(item.get('commercial_partner_id') or '') or None,
                     'manager_user_id': str(item.get('manager_user_id') or '') or None,
+                    'head_sales_commission_rate': float(
+                        item.get('head_sales_commission_rate') or 0
+                    ),
                     'can_create_prospect_manually': bool(
                         item.get('can_create_prospect_manually', False)
                     ),
@@ -421,6 +424,30 @@ class CloudAuthService:
         if not isinstance(payload, dict):
             raise CloudAuthError(
                 "Form@Prospect Cloud n'a pas confirmé la modification du Head of Sales."
+            )
+        return payload
+
+    def set_head_sales_commission_rate(
+        self,
+        membership_id: str,
+        rate: float,
+    ) -> dict:
+        """Configure le pourcentage dû au Head of Sales sur les commissions de son équipe."""
+        if self.current_user is None:
+            raise CloudAuthError("Session utilisateur indisponible.")
+
+        normalized_rate = round(float(rate), 2)
+        if normalized_rate < 0 or normalized_rate > 100:
+            raise ValueError("Le taux Head of Sales doit être compris entre 0 et 100 %.")
+
+        payload = self.api.patch_json(
+            f"/admin/users/{str(membership_id).strip()}",
+            {"head_sales_commission_rate": normalized_rate},
+        )
+        if not isinstance(payload, dict):
+            raise CloudAuthError(
+                "Form@Prospect Cloud n'a pas confirmé la modification "
+                "du taux Head of Sales."
             )
         return payload
 

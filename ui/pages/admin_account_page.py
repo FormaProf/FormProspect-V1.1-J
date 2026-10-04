@@ -5,12 +5,17 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -615,6 +620,19 @@ class AdminAccountPage(QWidget):
                         Qt.UserRole + 1,
                         str(user.get("manager_user_id") or "") or None,
                     )
+                    item.setData(
+                        Qt.UserRole + 2,
+                        str(
+                            user.get("user_id")
+                            or user.get("cloud_user_id")
+                            or ""
+                        ).strip()
+                        or None,
+                    )
+                    item.setData(
+                        Qt.UserRole + 3,
+                        float(user.get("head_sales_commission_rate") or 0),
+                    )
 
                 item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
@@ -759,6 +777,16 @@ class AdminAccountPage(QWidget):
             if permission_item is not None
             else None
         )
+        cloud_user_id = (
+            str(permission_item.data(Qt.UserRole + 2) or "").strip() or None
+            if permission_item is not None
+            else None
+        )
+        head_sales_commission_rate = (
+            float(permission_item.data(Qt.UserRole + 3) or 0)
+            if permission_item is not None
+            else 0.0
+        )
 
         return {
             "id": cell(0),
@@ -770,6 +798,8 @@ class AdminAccountPage(QWidget):
                 can_create_prospect_manually
             ),
             "manager_user_id": manager_user_id,
+            "user_id": cloud_user_id,
+            "head_sales_commission_rate": head_sales_commission_rate,
         }
 
     def _selected_user(self):
@@ -788,31 +818,35 @@ class AdminAccountPage(QWidget):
 
         self.promote_button.setVisible(True)
         details = self._selected_user_details(show_message=False)
+        promotable_roles = {"Commercial", "Formateur"}
         enabled = bool(
             details
-            and details["role"] == "Commercial"
+            and details["role"] in promotable_roles
             and details["active"]
         )
         self.promote_button.setEnabled(enabled)
 
         if enabled:
             self.promote_button.setToolTip(
-                f"Promouvoir {details['name']} en Head of Sales."
+                f"Passer {details['name']} en Head of Sales."
             )
-        elif details and details["role"] == "Commercial" and not details["active"]:
+        elif details and details["role"] in promotable_roles and not details["active"]:
             self.promote_button.setToolTip(
-                "Activez d'abord ce compte avant de le promouvoir."
+                "Activez d'abord ce compte avant de le passer en Head of Sales."
             )
         elif details and details["role"] == "Head of Sales":
             self.promote_button.setToolTip("Ce membre est déjà Head of Sales.")
         else:
             self.promote_button.setToolTip(
-                "Sélectionnez un commercial actif à promouvoir en Head of Sales."
+                "Sélectionnez un commercial ou un formateur actif."
             )
 
     def _assign_manager(self):
         details = self._selected_user_details()
         if details is None:
+            return
+        if details["role"] == "Head of Sales" and details["active"]:
+            self._manage_manager_team(details)
             return
         if details["role"] != "Commercial" or not details["active"]:
             return
@@ -823,6 +857,10 @@ class AdminAccountPage(QWidget):
             for user in users
             if user.get("active") and user.get("role") == "Manager"
         ]
+
+        current_manager_id = str(
+            details.get("manager_user_id") or ""
+        ).strip()
 
         labels = ["Aucun"]
         manager_ids = [None]
@@ -837,6 +875,15 @@ class AdminAccountPage(QWidget):
             if not manager_id:
                 continue
 
+            # Un commercial déjà rattaché ne peut pas être basculé directement
+            # vers un autre Head of Sales. Il faut d'abord retirer son rattachement.
+            if current_manager_id and manager_id != current_manager_id:
+                continue
+
+            rate = float(user.get("head_sales_commission_rate") or 0)
+            if not current_manager_id and rate <= 0:
+                continue
+
             full_name = (
                 f"{user.get('first_name') or ''} "
                 f"{user.get('last_name') or ''}"
@@ -845,8 +892,19 @@ class AdminAccountPage(QWidget):
             labels.append(label)
             manager_ids.append(manager_id)
 
-            if manager_id == details.get("manager_user_id"):
+            if manager_id == current_manager_id:
                 current_index = len(labels) - 1
+
+        if len(labels) == 1 and not current_manager_id:
+            QMessageBox.information(
+                self,
+                "Affecter un Head of Sales",
+                (
+                    "Aucun Head of Sales avec un taux de commission configuré "
+                    "n'est disponible."
+                ),
+            )
+            return
 
         selected_label, accepted = QInputDialog.getItem(
             self,
@@ -868,6 +926,240 @@ class AdminAccountPage(QWidget):
             f"Le Head of Sales de {details['name']} a été mis à jour.",
         )
 
+    def _select_manager_team(
+        self,
+        manager_name: str,
+        manager_user_id: str,
+        commercials,
+        current_rate: float,
+    ) -> tuple[set[str], float] | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Équipe de {manager_name}")
+        dialog.setMinimumWidth(540)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        info = QLabel(
+            "Configurez le taux du Head of Sales puis cochez les commerciaux "
+            "à lui rattacher. Un commercial déjà rattaché à un autre Head of Sales "
+            "est verrouillé : il doit d'abord être retiré de son équipe actuelle."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        rate_row = QHBoxLayout()
+        rate_label = QLabel("Commission sur les commissions de l'équipe :")
+        rate_spin = QDoubleSpinBox(dialog)
+        rate_spin.setRange(0.0, 100.0)
+        rate_spin.setDecimals(2)
+        rate_spin.setSingleStep(0.5)
+        rate_spin.setSuffix(" %")
+        rate_spin.setValue(float(current_rate or 0))
+        rate_spin.setFixedWidth(130)
+        rate_row.addWidget(rate_label)
+        rate_row.addStretch()
+        rate_row.addWidget(rate_spin)
+        layout.addLayout(rate_row)
+
+        team_list = QListWidget(dialog)
+        team_list.setSelectionMode(QAbstractItemView.NoSelection)
+
+        for user in commercials:
+            membership_id = str(user.get("id") or "").strip()
+            if not membership_id:
+                continue
+
+            full_name = (
+                f"{user.get('first_name') or ''} "
+                f"{user.get('last_name') or ''}"
+            ).strip()
+            label = full_name or str(user.get("email") or membership_id)
+            current_manager_id = str(
+                user.get("manager_user_id") or ""
+            ).strip()
+            assigned_elsewhere = bool(
+                current_manager_id
+                and current_manager_id != manager_user_id
+            )
+            if assigned_elsewhere:
+                label += "  —  déjà rattaché à un autre Head of Sales"
+
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, membership_id)
+
+            if assigned_elsewhere:
+                item.setFlags(
+                    item.flags()
+                    & ~Qt.ItemIsEnabled
+                    & ~Qt.ItemIsUserCheckable
+                )
+                item.setToolTip(
+                    "Retirez d'abord ce commercial de son Head of Sales actuel."
+                )
+            else:
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.Checked
+                    if current_manager_id == manager_user_id
+                    else Qt.Unchecked
+                )
+
+            team_list.addItem(item)
+
+        layout.addWidget(team_list, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+
+        selected_memberships = set()
+        for index in range(team_list.count()):
+            item = team_list.item(index)
+            if (
+                item.flags() & Qt.ItemIsUserCheckable
+                and item.checkState() == Qt.Checked
+            ):
+                membership_id = str(item.data(Qt.UserRole) or "").strip()
+                if membership_id:
+                    selected_memberships.add(membership_id)
+
+        selected_rate = float(rate_spin.value())
+        if selected_memberships and selected_rate <= 0:
+            QMessageBox.warning(
+                self,
+                "Taux Head of Sales",
+                (
+                    "Renseignez un taux supérieur à 0 % avant d'affecter "
+                    "des commerciaux à ce Head of Sales."
+                ),
+            )
+            return None
+
+        return selected_memberships, selected_rate
+
+    def _manage_manager_team(self, details) -> None:
+        users = self.auth_service.list_users()
+        manager_user_id = str(details.get("user_id") or "").strip()
+
+        if not manager_user_id:
+            for user in users:
+                if str(user.get("id") or "").strip() == details["id"]:
+                    manager_user_id = str(
+                        user.get("user_id")
+                        or user.get("cloud_user_id")
+                        or ""
+                    ).strip()
+                    break
+
+        if not manager_user_id:
+            QMessageBox.warning(
+                self,
+                "Équipe commerciale",
+                "L'identifiant Cloud du Head of Sales est indisponible.",
+            )
+            return
+
+        commercials = [
+            user
+            for user in users
+            if user.get("active") and user.get("role") == "Commercial"
+        ]
+        selection = self._select_manager_team(
+            details["name"],
+            manager_user_id,
+            commercials,
+            float(details.get("head_sales_commission_rate") or 0),
+        )
+        if selection is None:
+            return
+
+        selected_memberships, selected_rate = selection
+        changed = 0
+
+        try:
+            current_rate = float(
+                details.get("head_sales_commission_rate") or 0
+            )
+
+            # Si le taux passe à 0 %, l'équipe doit d'abord être vidée côté
+            # Cloud. Pour tout taux positif, on peut enregistrer le taux avant
+            # d'ajouter de nouveaux commerciaux.
+            if (
+                selected_rate > 0
+                and abs(selected_rate - current_rate) > 0.0001
+            ):
+                self.auth_service.set_head_sales_commission_rate(
+                    details["id"],
+                    selected_rate,
+                )
+
+            for user in commercials:
+                membership_id = str(user.get("id") or "").strip()
+                if not membership_id:
+                    continue
+
+                current_manager_id = str(
+                    user.get("manager_user_id") or ""
+                ).strip()
+                should_belong = membership_id in selected_memberships
+
+                # Double sécurité Desktop : une affectation existante chez un
+                # autre Head of Sales n'est jamais écrasée silencieusement.
+                if (
+                    should_belong
+                    and current_manager_id
+                    and current_manager_id != manager_user_id
+                ):
+                    continue
+
+                if should_belong and current_manager_id != manager_user_id:
+                    self.auth_service.set_manager(
+                        membership_id,
+                        manager_user_id,
+                    )
+                    changed += 1
+                elif (
+                    not should_belong
+                    and current_manager_id == manager_user_id
+                ):
+                    self.auth_service.set_manager(membership_id, None)
+                    changed += 1
+
+            if (
+                selected_rate <= 0
+                and abs(selected_rate - current_rate) > 0.0001
+            ):
+                self.auth_service.set_head_sales_commission_rate(
+                    details["id"],
+                    selected_rate,
+                )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Affectation impossible",
+                str(exc),
+            )
+            return
+
+        self.rafraichir()
+        NotificationManager.success(
+            "Équipe mise à jour",
+            (
+                f"L'équipe de {details['name']} a été mise à jour "
+                f"({changed} modification{'s' if changed != 1 else ''}) · "
+                f"taux {selected_rate:.2f} %."
+            ),
+        )
+
     def _update_manager_assignment_button(self):
         if not hasattr(self, "manager_assignment_button"):
             return
@@ -880,21 +1172,33 @@ class AdminAccountPage(QWidget):
 
         button.setVisible(True)
         details = self._selected_user_details(show_message=False)
-        enabled = bool(
+        is_commercial = bool(
             details
             and details["role"] == "Commercial"
             and details["active"]
         )
-        button.setEnabled(enabled)
+        is_manager = bool(
+            details
+            and details["role"] == "Head of Sales"
+            and details["active"]
+        )
+        button.setEnabled(is_commercial or is_manager)
 
-        if enabled:
+        if is_manager:
+            button.setText("Gérer l'équipe")
             button.setToolTip(
-              f"Affecter un Head of Sales à {details['name']}."
+                f"Gérer les commerciaux rattachés à {details['name']}."
             )
         else:
-            button.setToolTip(
-                "Sélectionnez un commercial actif."
-            )
+            button.setText("Affecter un Head of Sales")
+            if is_commercial:
+                button.setToolTip(
+                    f"Affecter un Head of Sales à {details['name']}."
+                )
+            else:
+                button.setToolTip(
+                    "Sélectionnez un commercial ou un Head of Sales actif."
+                )
 
     def _update_manual_prospect_permission_button(self):
         if not hasattr(
@@ -1118,11 +1422,11 @@ class AdminAccountPage(QWidget):
         if details is None:
             return
 
-        if details["role"] != "Commercial":
+        if details["role"] not in {"Commercial", "Formateur"}:
             QMessageBox.information(
                 self,
                 "Promotion",
-                "Seul un commercial peut être promu en Head of Sales depuis cette action.",
+                "Seuls un commercial ou un formateur peuvent être passés en Head of Sales depuis cette action.",
             )
             return
 
@@ -1138,10 +1442,11 @@ class AdminAccountPage(QWidget):
             self,
             "Promouvoir en Head of Sales",
             (
-                f"Promouvoir {details['name']} en Head of Sales ?\n\n"
-                "Son rôle Cloud passera de Commercial à Manager. Il disposera "
-                "des droits de supervision de l'activité commerciale et pourra "
-                "encadrer des commerciaux.\n\n"
+                f"Passer {details['name']} en Head of Sales ?\n\n"
+                f"Son rôle Cloud passera de {details['role']} à Manager. "
+                "Il disposera des droits de supervision de l'activité commerciale "
+                "et pourra encadrer des commerciaux.\n\n"
+                "Les données existantes de son compte sont conservées. "
                 "Le changement de droits est immédiat côté Cloud."
             ),
             QMessageBox.Yes | QMessageBox.No,
