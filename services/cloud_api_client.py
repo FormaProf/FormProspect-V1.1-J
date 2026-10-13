@@ -245,6 +245,46 @@ class CloudAPIClient:
         ).json()
 
     # ------------------------------------------------------------------
+    # Google Calendar
+    # ------------------------------------------------------------------
+
+    def get_google_calendar_status(self) -> dict[str, Any]:
+        """Return the current user's Google Calendar OAuth status."""
+        payload = self.get_json("/google-calendar/status")
+        return payload if isinstance(payload, dict) else {}
+
+    def get_google_calendar_connect_url(self) -> str:
+        """Create a short-lived Google OAuth authorization URL."""
+        payload = self.post_json(
+            "/google-calendar/connect-url",
+            {},
+            expected=(200,),
+        )
+        return str(
+            payload.get("authorization_url", "")
+            if isinstance(payload, dict)
+            else ""
+        ).strip()
+
+    def disconnect_google_calendar(self) -> dict[str, Any]:
+        """Disconnect the current user's Google Calendar account."""
+        payload = self.post_json(
+            "/google-calendar/disconnect",
+            {},
+            expected=(200,),
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    def sync_google_calendar_planned_actions(self) -> dict[str, Any]:
+        """Backfill/reconcile all planned actions for the current user."""
+        payload = self.post_json(
+            "/google-calendar/sync-planned-actions",
+            {},
+            expected=(200,),
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    # ------------------------------------------------------------------
     # Users
     # ------------------------------------------------------------------
 

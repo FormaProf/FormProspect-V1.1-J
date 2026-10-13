@@ -1,6 +1,6 @@
 import threading
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QMessageBox, QWidget
 
@@ -49,6 +49,9 @@ from ui.responsive_layout import (
 
 
 class MainWindow(QMainWindow):
+    google_calendar_auto_sync_ready = Signal(dict)
+    google_calendar_auto_sync_failed = Signal(str)
+
     def __init__(self, auth_service: AuthService):
         super().__init__()
         self.auth_service = auth_service
@@ -245,6 +248,33 @@ class MainWindow(QMainWindow):
         if getattr(self.auth_service, "is_cloud", False):
             self._presence_timer.start()
             QTimer.singleShot(8_000, self._send_presence_heartbeat)
+
+        # Google Agenda -> Form@Prospect : une seule réconciliation périodique
+        # par utilisateur Cloud. Elle tourne hors du thread UI, sans popup et
+        # sans polling agressif. Le bouton manuel reste disponible en secours.
+        self._google_calendar_auto_sync_running = False
+        self._google_calendar_auto_sync_result = None
+        self._google_calendar_auto_sync_error = None
+        self.google_calendar_auto_sync_ready.connect(
+            self._on_google_calendar_auto_sync_ready
+        )
+        self.google_calendar_auto_sync_failed.connect(
+            self._on_google_calendar_auto_sync_failed
+        )
+        self._google_calendar_auto_sync_timer = QTimer(self)
+        self._google_calendar_auto_sync_timer.setInterval(300_000)
+        self._google_calendar_auto_sync_timer.timeout.connect(
+            self._start_google_calendar_auto_sync
+        )
+        if (
+            getattr(self.auth_service, "is_cloud", False)
+            and not self.is_trainer_space
+        ):
+            self._google_calendar_auto_sync_timer.start()
+            QTimer.singleShot(
+                20_000,
+                self._start_google_calendar_auto_sync,
+            )
 
         # Vérification discrète après l'ouverture complète de l'application.
         QTimer.singleShot(3500, lambda: self.verifier_mises_a_jour(False))
@@ -583,6 +613,95 @@ class MainWindow(QMainWindow):
 
         self.ouvrir_prospects()
 
+    def _start_google_calendar_auto_sync(self):
+        if self._google_calendar_auto_sync_running:
+            return
+        if not getattr(self.auth_service, "is_cloud", False):
+            return
+        if self.is_trainer_space:
+            return
+
+        self._google_calendar_auto_sync_running = True
+        self._google_calendar_auto_sync_result = None
+        self._google_calendar_auto_sync_error = None
+
+        def worker():
+            try:
+                api = CloudRuntime.api()
+                status = api.get_google_calendar_status()
+                if not (
+                    bool(status.get("configured"))
+                    and bool(status.get("connected"))
+                ):
+                    self.google_calendar_auto_sync_ready.emit(
+                        {
+                            "created": 0,
+                            "updated": 0,
+                            "deleted": 0,
+                            "skipped": 1,
+                            "errors": 0,
+                            "total": 1,
+                            "_not_connected": True,
+                        }
+                    )
+                    return
+
+                result = api.sync_google_calendar_planned_actions()
+                self.google_calendar_auto_sync_ready.emit(
+                    result if isinstance(result, dict) else {}
+                )
+            except Exception as exc:
+                self.google_calendar_auto_sync_failed.emit(str(exc))
+
+        threading.Thread(
+            target=worker,
+            name="FormProspectGoogleCalendarAutoSync",
+            daemon=True,
+        ).start()
+
+    def _on_google_calendar_auto_sync_ready(self, result: dict):
+        self._google_calendar_auto_sync_running = False
+        self._google_calendar_auto_sync_result = dict(result or {})
+        self._google_calendar_auto_sync_error = None
+
+        if self._google_calendar_auto_sync_result.get("_not_connected"):
+            return
+
+        changed = sum(
+            int(self._google_calendar_auto_sync_result.get(key) or 0)
+            for key in ("created", "updated", "deleted")
+        )
+        errors = int(
+            self._google_calendar_auto_sync_result.get("errors") or 0
+        )
+
+        # Si l'Agenda est affiché, ses données Cloud sont rechargées
+        # automatiquement après une modification reçue de Google.
+        if (
+            changed > 0
+            and hasattr(self, "agenda_page")
+            and self.pages.currentWidget() is self.agenda_page
+        ):
+            self.agenda_page.rafraichir(force=True)
+
+        if changed > 0:
+            self.statusBar().showMessage(
+                f"Google Agenda synchronisé : {changed} modification(s).",
+                5000,
+            )
+        elif errors > 0:
+            self.statusBar().showMessage(
+                "Google Agenda : certaines actions n'ont pas pu être synchronisées.",
+                5000,
+            )
+
+    def _on_google_calendar_auto_sync_failed(self, message: str):
+        self._google_calendar_auto_sync_running = False
+        self._google_calendar_auto_sync_result = None
+        self._google_calendar_auto_sync_error = str(message or "")
+        # Une panne Google ou réseau ne doit jamais interrompre le travail
+        # commercial ni déclencher une popup répétitive.
+
     def ouvrir_dashboard(self):
         if SessionState.has_role("Formateur"):
             self.ouvrir_trainer_dashboard()
@@ -613,6 +732,7 @@ class MainWindow(QMainWindow):
         # reuses its cache, so navigation never waits on network pagination.
         self.mettre_a_jour_barre_statut()
         self.pages.setCurrentWidget(self.agenda_page)
+        self._start_google_calendar_auto_sync()
         ensure_loaded = getattr(self.agenda_page, "ensure_loaded", None)
         if callable(ensure_loaded):
             ensure_loaded()
@@ -754,10 +874,17 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.Yes:
             if hasattr(self, "_presence_timer"):
                 self._presence_timer.stop()
+            if hasattr(self, "_google_calendar_auto_sync_timer"):
+                self._google_calendar_auto_sync_timer.stop()
             if hasattr(self.auth_service, "logout"):
                 self.auth_service.logout()
             SessionState.logout()
             QApplication.quit()
+
+    def closeEvent(self, event):
+        if hasattr(self, "_google_calendar_auto_sync_timer"):
+            self._google_calendar_auto_sync_timer.stop()
+        super().closeEvent(event)
 
     def _apply_native_window_theme(self):
         from core.theme_settings import get_theme_preference
