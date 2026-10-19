@@ -324,12 +324,8 @@ class ProspectsPage(QWidget):
         self.bouton_exporter.setFixedHeight(40)
         self.bouton_exporter.clicked.connect(self.exporter_excel)
 
-        current_user = SessionState.user()
-        current_role = str(
-            getattr(current_user, "role", "") or ""
-        ).strip().lower()
         self.bouton_exporter.setVisible(
-            current_role != "commercial"
+            self._peut_exporter_excel()
         )
 
         bouton_scoring = QPushButton("Calculer les scores")
@@ -962,6 +958,22 @@ class ProspectsPage(QWidget):
         )
 
     @staticmethod
+    def _peut_exporter_excel() -> bool:
+        user = SessionState.user()
+        if user is None:
+            return False
+
+        role = str(
+            getattr(user, "role", "") or ""
+        ).strip().casefold()
+
+        return role in {
+            "administrateur",
+            "admin",
+            "administrator",
+        }
+
+    @staticmethod
     def _peut_creer_prospect_manuellement() -> bool:
         user = SessionState.user()
 
@@ -1571,7 +1583,7 @@ class ProspectsPage(QWidget):
         QMessageBox.information(
             self,
             "Client créé",
-            "La fiche client a été validée.\\n\\n"
+            "La fiche client a été validée.\n\n"
             "Le prospect est maintenant qualifié en Client.",
         )
 
@@ -1893,28 +1905,14 @@ class ProspectsPage(QWidget):
             QMessageBox.critical(self, "Erreur scoring", str(exc))
 
     def exporter_excel(self):
-        current_user = SessionState.user()
-        current_role = str(
-            getattr(current_user, "role", "") or ""
-        ).strip().lower()
-
-        # Double sécurité : même déclenchée autrement que par le bouton,
-        # la fonction reste interdite aux commerciaux.
-        if current_role == "commercial":
+        if not self._peut_exporter_excel():
             QMessageBox.warning(
                 self,
                 "Export interdit",
-                "Votre profil commercial ne permet pas d'exporter les données.",
+                "Seul un administrateur peut exporter les données CRM.",
             )
             return
 
-        if self._is_cloud():
-            QMessageBox.information(
-                self,
-                "Export",
-                "L'export Cloud sera activé dans un prochain lot.",
-            )
-            return
         if not self._has_data_source():
             QMessageBox.warning(self, "Attention", "Aucun projet actif.")
             return
@@ -1929,13 +1927,49 @@ class ProspectsPage(QWidget):
         if not fichier_sortie:
             return
 
-        try:
-            projet = ApplicationState.get_project()
+        self.bouton_exporter.setEnabled(False)
 
-            total = self.export_service.exporter_prospects_excel(
-                projet.database,
-                fichier_sortie,
-            )
+        try:
+            if not self._is_cloud():
+                projet = ApplicationState.get_project()
+                total = self.export_service.exporter_prospects_excel(
+                    projet.database,
+                    fichier_sortie,
+                )
+            else:
+                database_path = self._database_path()
+                project_id = self._project_scope_id()
+                criteres = dict(self.filters_bar.criteres())
+
+                batch_size = 500
+                offset = 0
+                prospects = []
+
+                while True:
+                    batch = list(
+                        self.prospect_service.rechercher_prospects_filtres(
+                            database_path,
+                            project_id=project_id,
+                            **criteres,
+                            limite=batch_size,
+                            offset=offset,
+                        )
+                        or []
+                    )
+
+                    if not batch:
+                        break
+
+                    prospects.extend(batch)
+                    offset += len(batch)
+
+                    if len(batch) < batch_size:
+                        break
+
+                total = self.export_service.exporter_lignes_prospects_excel(
+                    prospects,
+                    fichier_sortie,
+                )
 
             QMessageBox.information(
                 self,
@@ -1943,5 +1977,13 @@ class ProspectsPage(QWidget):
                 f"{total} prospects exportés avec succès.",
             )
 
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur export", str(e))
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Erreur export",
+                str(exc),
+            )
+        finally:
+            self.bouton_exporter.setEnabled(
+                self._peut_exporter_excel()
+            )

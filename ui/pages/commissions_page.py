@@ -258,6 +258,21 @@ class CommissionsPage(QWidget):
             "Commissions versées", "0,00 €", "success", "Paiements finalisés"
         )
 
+        is_head_sales = SessionState.has_role("Manager")
+        if is_head_sales:
+            self.pending_card.label.setText("Gain potentiel en attente")
+            self.pending_card.helper.setText(
+                "Commission personnelle + part Head of Sales non encore dues"
+            )
+            self.due_card.label.setText("Gain à percevoir")
+            self.due_card.helper.setText(
+                "Commission personnelle + part Head of Sales arrivées à échéance"
+            )
+            self.paid_card.label.setText("Gain versé")
+            self.paid_card.helper.setText(
+                "Commission personnelle + part Head of Sales déjà réglées"
+            )
+
         self.metric_cards = [
             self.contracts_card,
             self.signed_revenue_card,
@@ -270,6 +285,24 @@ class CommissionsPage(QWidget):
         for index, card in enumerate(self.metric_cards):
             cards.setColumnStretch(index, 1)
             cards.addWidget(card, 0, index)
+
+        self.team_commission_card = PremiumFinanceCard(
+            "Commissions de l'équipe",
+            "0,00 €",
+            "primary",
+            "Total des commissions générées par les commerciaux visibles",
+        )
+        self.head_sales_period_card = PremiumFinanceCard(
+            "Part Head of Sales sur la période",
+            "0,00 €",
+            "finance",
+            "Total de votre part sur les ventes qui vous sont rattachées",
+        )
+        self.team_commission_card.setVisible(is_head_sales)
+        self.head_sales_period_card.setVisible(is_head_sales)
+
+        cards.addWidget(self.team_commission_card, 1, 0, 1, 3)
+        cards.addWidget(self.head_sales_period_card, 1, 3, 1, 3)
 
         root.addLayout(cards)
 
@@ -364,10 +397,10 @@ class CommissionsPage(QWidget):
 
         if SessionState.has_role("Manager"):
             self.table.horizontalHeaderItem(self.amount_col).setText(
-                "Commission équipe"
+                "Commission commerciale"
             )
             self.table.horizontalHeaderItem(self.rate_col).setText(
-                "Taux Head of Sales"
+                "Taux appliqué"
             )
             self.table.horizontalHeaderItem(self.commission_col).setText(
                 "Ma commission"
@@ -682,6 +715,62 @@ class CommissionsPage(QWidget):
         except (TypeError, ValueError):
             return "0 %"
 
+    @staticmethod
+    def _manager_team_commission_total(sales_rows) -> int:
+        return sum(
+            int(sale.get("commercial_commission_cents") or 0)
+            for sale in sales_rows
+            if (
+                sale.get("status") != "cancelled"
+                and sale.get("commission_beneficiary_type") == "head_sales"
+            )
+        )
+
+    @staticmethod
+    def _manager_gain_totals(sales_rows) -> dict[str, int]:
+        totals = {
+            "pending": 0,
+            "due": 0,
+            "paid": 0,
+        }
+        for sale in sales_rows:
+            if sale.get("status") == "cancelled":
+                continue
+
+            commission_status = str(sale.get("commission_status") or "")
+            if commission_status not in totals:
+                continue
+
+            totals[commission_status] += int(
+                sale.get("commission_cents") or 0
+            )
+
+        return totals
+
+    @staticmethod
+    def _manager_rate_helper(sales_rows, *, pending_only: bool = False) -> str:
+        rates = set()
+        for sale in sales_rows:
+            if sale.get("status") == "cancelled":
+                continue
+            if int(sale.get("commission_cents") or 0) <= 0:
+                continue
+            if pending_only and sale.get("commission_status") != "pending":
+                continue
+            try:
+                rate = float(sale.get("commission_rate") or 0)
+            except (TypeError, ValueError):
+                continue
+            if rate > 0:
+                rates.add(round(rate, 4))
+
+        if len(rates) == 1:
+            rate = next(iter(rates))
+            return f"{rate:g} % des commissions équipe concernées"
+        if len(rates) > 1:
+            return "Taux historiques appliqués vente par vente"
+        return "Aucun gain Head of Sales sur cette période"
+
     def _reset(self) -> None:
         self.sales_rows = []
         self.table.setRowCount(0)
@@ -691,6 +780,8 @@ class CommissionsPage(QWidget):
         self.pending_card.set_value("0,00 €")
         self.due_card.set_value("0,00 €")
         self.paid_card.set_value("0,00 €")
+        self.team_commission_card.set_value("0,00 €")
+        self.head_sales_period_card.set_value("0,00 €")
         self._update_table_empty_state()
         self._update_action_buttons()
 
@@ -746,15 +837,54 @@ class CommissionsPage(QWidget):
         self.collected_revenue_card.set_value(
             self._format_euro(summary["collected_revenue_cents"])
         )
-        self.pending_card.set_value(
-            self._format_euro(summary["commission_pending_cents"])
-        )
-        self.due_card.set_value(
-            self._format_euro(summary["commission_due_cents"])
-        )
-        self.paid_card.set_value(
-            self._format_euro(summary["commission_paid_cents"])
-        )
+        if user and user.role == "Manager":
+            manager_gain_totals = self._manager_gain_totals(self.sales_rows)
+            self.pending_card.set_value(
+                self._format_euro(manager_gain_totals["pending"])
+            )
+            self.due_card.set_value(
+                self._format_euro(manager_gain_totals["due"])
+            )
+            self.paid_card.set_value(
+                self._format_euro(manager_gain_totals["paid"])
+            )
+        else:
+            self.pending_card.set_value(
+                self._format_euro(summary["commission_pending_cents"])
+            )
+            self.due_card.set_value(
+                self._format_euro(summary["commission_due_cents"])
+            )
+            self.paid_card.set_value(
+                self._format_euro(summary["commission_paid_cents"])
+            )
+
+        if user and user.role == "Manager":
+            team_commission_cents = self._manager_team_commission_total(
+                self.sales_rows
+            )
+            head_sales_period_cents = (
+                int(summary["commission_pending_cents"])
+                + int(summary["commission_due_cents"])
+                + int(summary["commission_paid_cents"])
+            )
+
+            self.team_commission_card.set_value(
+                self._format_euro(team_commission_cents)
+            )
+            self.head_sales_period_card.set_value(
+                self._format_euro(head_sales_period_cents)
+            )
+
+            self.pending_card.helper.setText(
+                self._manager_rate_helper(
+                    self.sales_rows,
+                    pending_only=True,
+                )
+            )
+            self.head_sales_period_card.helper.setText(
+                self._manager_rate_helper(self.sales_rows)
+            )
 
         self.table.setRowCount(len(self.sales_rows))
         for row_index, sale in enumerate(self.sales_rows):
